@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Solana Dashboard</title>
+<meta name="description" content="SOL price and returns, 2026 year-to-date network and market activity, and live Solana chain health.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23030815'/%3E%3Cg stroke-width='3' stroke-linecap='round' fill='none'%3E%3Cpath d='M7 11h18' stroke='%2314F195'/%3E%3Cpath d='M7 16h18' stroke='%23F97316'/%3E%3Cpath d='M7 21h18' stroke='%238FA5D4'/%3E%3C/g%3E%3C/svg%3E" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400..800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<!-- Chart.js ships no date logic; the time scales below need this adapter. -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  /* Design tokens lifted from solanarainbow.com so the two sites read as siblings. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --orange: #F97316;
+    --peri:   #8FA5D4;
+    --mint:   #14F195;
+    --ink:    #F1F5FB;
+    --mute:   #6B7FAB;
+    --panel:  rgba(13, 26, 52, 0.7);
+    --panel-2:rgba(13, 26, 52, 0.6);
+    --line:   rgba(143, 165, 212, 0.16);
+    --line-2: rgba(143, 165, 212, 0.08);
+    --neg:    #FF6B6B;
+  }
+  html, body { height: 100%; margin: 0; background: #030815; }
+  body {
+    background:
+      radial-gradient(80% 50% at 20% 0%, rgba(40,70,140,0.30) 0%, transparent 55%) fixed,
+      linear-gradient(180deg, #0A1633 0%, #060E26 60%, #030815 100%) #030815;
+    font-family: Syne, system-ui, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  /* Numerals fall back to a system face for tabular alignment — Syne's figures wander. */
+  .num { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+         font-variant-numeric: tabular-nums; letter-spacing: 0; }
+
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 34px 48px 0; }
+  h1 { font-size: clamp(28px, 3.4vw, 50px); font-weight: 700; letter-spacing: -0.01em; line-height: 1.05; }
+  .subtitle { color: var(--peri); font-size: clamp(14px, 1.3vw, 19px); font-weight: 600; margin-top: 8px; }
+
+  .live { display: flex; align-items: center; gap: 9px; background: var(--panel); border: 1px solid var(--line);
+          border-radius: 20px; padding: 8px 15px; font-size: 12px; font-weight: 700;
+          letter-spacing: .09em; text-transform: uppercase; color: var(--peri); white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); animation: pulse 2.4s infinite; }
+  .live.stale .dot { background: var(--orange); animation: none; }
+  .live.down  .dot { background: var(--neg);    animation: none; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(20,241,149,.55)} 70%{box-shadow:0 0 0 8px rgba(20,241,149,0)} 100%{box-shadow:0 0 0 0 rgba(20,241,149,0)} }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+
+  /* section heading rule */
+  .shead { display: flex; align-items: center; gap: 14px; padding: 30px 48px 0; }
+  .shead h2 { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--mute); white-space: nowrap; }
+  .shead .rule { flex: 1; height: 1px; background: var(--line-2); }
+  .shead .asof { font-size: 12px; font-weight: 600; color: var(--mute); font-style: italic; white-space: nowrap; }
+
+  .tiles { display: grid; gap: 12px; padding: 14px 48px 0;
+           grid-template-columns: repeat(auto-fit, minmax(186px, 1fr)); }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 13px 16px; }
+  .tile .k { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--mute); line-height: 1.35; }
+  .tile .v { font-size: 24px; font-weight: 700; margin-top: 5px; line-height: 1.1; }
+  .tile .s { font-size: 12.5px; font-weight: 600; color: var(--peri); margin-top: 3px; }
+  .tile.hero .v { font-size: 30px; }
+  .up   { color: var(--mint); }
+  .down { color: var(--neg); }
+
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 18px 48px 0; }
+  .ctl-label { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--mute); margin-right: 2px; }
+  .spacer { flex: 1 1 0; }
+  button.tgl { font-family: Syne; font-size: 14px; font-weight: 700; color: var(--peri); background: var(--panel);
+               border: 1px solid rgba(143,165,212,0.2); border-radius: 20px; padding: 7px 16px; cursor: pointer; }
+  button.tgl:hover { color: var(--ink); border-color: rgba(143,165,212,0.4); }
+  button.tgl[aria-pressed="true"] { color: #12100B; background: var(--orange); border-color: var(--orange); }
+  button.tgl:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+
+  .stage { padding: 14px 48px 0; }
+  .stage .wrap { position: relative; height: 44vh; min-height: 320px; max-height: 460px; }
+  .stage canvas { width: 100% !important; height: 100% !important; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; padding: 14px 48px 0; }
+  .panel { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 17px 19px; }
+  .panel h3 { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--mute); }
+  .panel .big { font-size: 25px; font-weight: 700; margin-top: 6px; }
+  .panel .note { font-size: 12.5px; color: var(--peri); font-weight: 600; margin-top: 3px; }
+
+  .spark { position: relative; height: 96px; margin-top: 12px; }
+  .spark canvas { width: 100% !important; height: 100% !important; }
+
+  .bar { height: 9px; border-radius: 99px; background: rgba(143,165,212,0.14); overflow: hidden; margin-top: 13px; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--orange), #F5A524); }
+  .rows { margin-top: 13px; display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+  .row { display: flex; justify-content: space-between; gap: 14px; color: var(--peri); }
+  .row b { color: var(--ink); font-weight: 700; }
+
+  /* Stacked stake bar — a deliberate nod to the rainbow bands. */
+  .stakebar { display: flex; height: 13px; border-radius: 99px; overflow: hidden; margin-top: 13px; gap: 1px; background: rgba(143,165,212,0.14); }
+  .stakebar > i { display: block; height: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .leg { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: #D3DBEA; }
+  .leg .sw { width: 15px; height: 5px; border-radius: 2px; flex: none; }
+
+  footer { display: flex; flex-direction: column; gap: 7px;
+           padding: 26px 48px 26px; border-top: 1px solid var(--line-2); margin-top: 26px; }
+  .fn { color: var(--mute); font-size: 12.5px; font-style: italic; font-weight: 600; }
+  a { color: var(--peri); }
+
+  @media (max-width: 760px) {
+    header, .shead, .tiles, .controls, .stage, .grid, footer { padding-left: 18px; padding-right: 18px; }
+    header { flex-direction: column; }
+    /* The nowrap "as of" stamp overflows a phone; drop it to its own line. */
+    .shead { flex-wrap: wrap; row-gap: 3px; }
+    .shead .rule { display: none; }
+    .shead .asof { white-space: normal; flex: 1 1 100%; }
+    .tiles { grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); }
+    .tile .v { font-size: 20px; } .tile.hero .v { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Solana Dashboard</h1>
+    <p class="subtitle">SOL returns, year-to-date network activity, and live chain health.</p>
+  </div>
+  <div class="live" id="live" title="Data freshness"><span class="dot"></span><span id="liveText">loading</span></div>
+</header>
+
+<!-- ---------------------------------------------------------------- price -->
+<div class="shead">
+  <h2>Price &amp; Returns</h2><span class="rule"></span>
+  <span class="asof" id="priceAsOf"></span>
+</div>
+<section class="tiles">
+  <div class="tile hero">
+    <div class="k">SOL Price</div>
+    <div class="v num" id="t_price">—</div>
+    <div class="s num" id="t_price_sub">&nbsp;</div>
+  </div>
+  <div class="tile"><div class="k">3-Month Return</div><div class="v num" id="t_r3m">—</div><div class="s">vs. 91 days ago</div></div>
+  <div class="tile"><div class="k">Year-to-Date Return</div><div class="v num" id="t_rytd">—</div><div class="s" id="t_rytd_sub">—</div></div>
+  <div class="tile"><div class="k">1-Year Return</div><div class="v num" id="t_r1y">—</div><div class="s">vs. 365 days ago</div></div>
+  <div class="tile"><div class="k">5-Year Return</div><div class="v num" id="t_r5y">—</div><div class="s">vs. 1,826 days ago</div></div>
+</section>
+
+<!-- ------------------------------------------------------------------ YTD -->
+<div class="shead">
+  <h2><span id="ytdYear">2026</span> Year-to-Date</h2><span class="rule"></span>
+  <span class="asof" id="ytdAsOf"></span>
+</div>
+<section class="tiles">
+  <div class="tile"><div class="k">YTD Transactions</div><div class="v num" id="t_txns">—</div><div class="s num" id="t_txns_sub">—</div></div>
+  <div class="tile"><div class="k">Avg. TPS <span id="tpsYear">2026</span></div><div class="v num" id="t_tps">—</div><div class="s">incl. vote transactions</div></div>
+  <div class="tile"><div class="k">YTD Revenue</div><div class="v num" id="t_rev">—</div><div class="s num" id="t_rev_sub">—</div></div>
+  <div class="tile"><div class="k">Stablecoin Supply</div><div class="v num" id="t_stable">—</div><div class="s num" id="t_stable_sub">—</div></div>
+  <div class="tile"><div class="k">YTD DEX Volume</div><div class="v num" id="t_dex">—</div><div class="s">spot, all DEXs</div></div>
+  <div class="tile"><div class="k">Avg. Transaction Fee YTD</div><div class="v num" id="t_fee">—</div><div class="s num" id="t_fee_sub">—</div></div>
+  <div class="tile"><div class="k">Active Validators</div><div class="v num" id="t_vals">—</div><div class="s num" id="t_vals_sub">live</div></div>
+  <div class="tile"><div class="k">Avg. Daily Trading Volume YTD</div><div class="v num" id="t_advol">—</div><div class="s">spot DEX per day</div></div>
+  <div class="tile"><div class="k">Tokenized Equity</div><div class="v num" id="t_tokeq">—</div><div class="s">on-chain supply</div></div>
+  <div class="tile"><div class="k">YTD Tokenized Equity Volume</div><div class="v num" id="t_tokeqvol">—</div><div class="s">by token issuer</div></div>
+  <div class="tile"><div class="k">Avg. Daily Traders</div><div class="v num" id="t_traders">—</div><div class="s">unique, per day YTD</div></div>
+  <div class="tile"><div class="k">YTD Perps Volume</div><div class="v num" id="t_perps">—</div><div class="s">futures notional</div></div>
+</section>
+
+<!-- ---------------------------------------------------------- price chart -->
+<div class="shead"><h2>SOL Price History</h2><span class="rule"></span></div>
+<div class="controls">
+  <span class="ctl-label">Range</span>
+  <button class="tgl" data-range="90"   aria-pressed="false">3M</button>
+  <button class="tgl" data-range="ytd"  aria-pressed="true">YTD</button>
+  <button class="tgl" data-range="365"  aria-pressed="false">1Y</button>
+  <button class="tgl" data-range="1826" aria-pressed="false">5Y</button>
+  <button class="tgl" data-range="all"  aria-pressed="false">All</button>
+  <span class="spacer"></span>
+  <span class="ctl-label">Scale</span>
+  <button class="tgl" data-scale="linear" aria-pressed="true">Linear</button>
+  <button class="tgl" data-scale="logarithmic" aria-pressed="false">Log</button>
+</div>
+<section class="stage">
+  <div class="wrap"><canvas id="priceChart" role="img" aria-label="SOL price history"></canvas></div>
+</section>
+
+<!-- ------------------------------------------------------- activity trend -->
+<div class="shead"><h2>Activity Trends</h2><span class="rule"></span><span class="asof">daily · Blockworks</span></div>
+<section class="grid" id="trendGrid"></section>
+
+<!-- ---------------------------------------------------------- live health -->
+<div class="shead"><h2>Live Network Health</h2><span class="rule"></span><span class="asof">public Solana RPC</span></div>
+<section class="grid">
+  <div class="panel">
+    <h3>Epoch Progress</h3>
+    <div class="big"><span class="num" id="epochBig">—</span></div>
+    <div class="note" id="epochEta">—</div>
+    <div class="bar"><i id="epochBar" style="width:0%"></i></div>
+    <div class="rows">
+      <div class="row"><span>Epoch</span><b class="num" id="epochNum">—</b></div>
+      <div class="row"><span>Slot</span><b class="num" id="slot">—</b></div>
+      <div class="row"><span>Avg slot time</span><b class="num" id="slotTime">—</b></div>
+      <div class="row"><span>Block height</span><b class="num" id="blockHeight">—</b></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Throughput — last 12h</h3>
+    <div class="big"><span class="num" id="tpsNow">—</span></div>
+    <div class="note">Live TPS · 12h avg <span class="num" id="tpsAvg">—</span> · peak <span class="num" id="tpsPeak">—</span></div>
+    <div class="spark"><canvas id="tpsChart" role="img" aria-label="Transactions per second, last 12 hours"></canvas></div>
+    <div class="legend">
+      <span class="leg"><span class="sw" style="background:var(--orange)"></span>Total TPS</span>
+      <span class="leg"><span class="sw" style="background:var(--mint)"></span>Non-vote TPS</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Stake &amp; Yield</h3>
+    <div class="big"><span class="num" id="stakePct">—</span></div>
+    <div class="note">of total supply staked · <span class="num" id="stakeTotal">—</span></div>
+    <div class="rows">
+      <div class="row"><span>Est. staking yield</span><b class="num" id="yieldEst">—</b></div>
+      <div class="row"><span>Inflation rate</span><b class="num" id="inflation">—</b></div>
+      <div class="row"><span>Nakamoto coefficient</span><b class="num" id="nakamoto">—</b></div>
+      <div class="row"><span>Client version</span><b class="num" id="version">—</b></div>
+    </div>
+  </div>
+
+  <div class="panel" style="grid-column: 1 / -1;">
+    <h3>Stake Distribution — top validators</h3>
+    <div class="big"><span class="num" id="topShare">—</span></div>
+    <div class="note">Share of active stake held by the ten largest validators</div>
+    <div class="stakebar" id="stakebar"></div>
+    <div class="legend" id="stakeLegend"></div>
+  </div>
+</section>
+
+<footer>
+  <span class="fn">Year-to-date figures cover 1 January to the latest complete day and are not annualised. Revenue is Blockworks&rsquo; Network REV (priority fees, base fees and Jito tips), reported in SOL and converted at each day&rsquo;s close.</span>
+  <span class="fn">Average transaction fee is total fees divided by total transactions, not a mean of daily averages. Average TPS includes vote transactions. Estimated staking yield assumes inflation accrues to stake and excludes MEV and validator commission.</span>
+  <span class="fn">Year-to-date and price data via the <a href="https://docs.blockworksresearch.com/">Blockworks API</a> · live chain data via public Solana RPC.</span>
+</footer>
+
+<script>
+/* ------------------------------------------------------------------ config */
+const CONFIG = {
+  // api.mainnet-beta.solana.com rejects browser origins with HTTP 403; publicnode
+  // sends permissive CORS headers. Swap in a Helius/Triton URL for higher limits.
+  RPC: 'https://solana-rpc.publicnode.com',
+  DATA: 'data.json',
+  NET_REFRESH_MS: 30000,
+};
+
+/* ----------------------------------------------------------------- helpers */
+const $ = id => document.getElementById(id);
+const RAINBOW = ['#F2C9DE','#E9469A','#EF5B7B','#F2683C','#F97316','#F5A524',
+                 '#EAD32A','#4ADE80','#14F195','#38BDF8','#6366F1','#A855F7'];
+
+const nf = (n, d = 0) => n == null || !isFinite(n) ? '—'
+  : n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+function compact(n, prefix = '') {
+  if (n == null || !isFinite(n)) return '—';
+  if (n === 0) return prefix + '0';           // keeps axis baselines from reading "0.0000"
+  const a = Math.abs(n);
+  for (const [v, s] of [[1e12,'T'],[1e9,'B'],[1e6,'M'],[1e3,'K']])
+    if (a >= v) return prefix + (n / v).toFixed(a / v >= 100 ? 0 : a / v >= 10 ? 1 : 2) + s;
+  return prefix + n.toFixed(a < 1 ? 4 : 2);
+}
+const usd = n => compact(n, '$');
+const price = n => n == null || !isFinite(n) ? '—'
+  : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 4 : 2 });
+const signed = (n, s = '%') => n == null || !isFinite(n) ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + s;
+
+/* Paint a signed percentage and colour it by direction. */
+function setPct(el, n, suffix = '%') {
+  el.textContent = signed(n, suffix);
+  el.classList.remove('up', 'down');
+  if (n != null && isFinite(n)) el.classList.add(n >= 0 ? 'up' : 'down');
+}
+function duration(secs) {
+  if (!isFinite(secs) || secs < 0) return '—';
+  const d = Math.floor(secs / 86400), h = Math.floor(secs % 86400 / 3600), m = Math.floor(secs % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+const fmtDate = iso => new Date(iso + 'T00:00:00Z')
+  .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+
+const health = { net: null, data: null };
+function paintHealth() {
+  const el = $('live'), t = $('liveText');
+  const vals = [health.net, health.data].filter(v => v !== null);
+  if (!vals.length) return;
+  if (vals.every(v => v === 'ok')) {
+    el.className = 'live';
+    t.textContent = 'live · ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  } else if (vals.some(v => v === 'ok')) { el.className = 'live stale'; t.textContent = 'partial data'; }
+  else { el.className = 'live down'; t.textContent = 'offline'; }
+}
+
+/* ------------------------------------------------------------------ fetches */
+let rpcId = 0;
+async function rpc(method, params = []) {
+  const r = await fetch(CONFIG.RPC, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
+  });
+  if (!r.ok) throw new Error(`RPC ${method} HTTP ${r.status}`);
+  const j = await r.json();
+  if (j.error) throw new Error(`RPC ${method}: ${j.error.message}`);
+  return j.result;
+}
+
+/* -------------------------------------------------------------------- state */
+const state = { range: 'ytd', scale: 'linear', priceSeries: [], totalSupply: null, inflation: null };
+
+/* -------------------------------------------------------------------- charts */
+Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+Chart.defaults.color = '#6B7FAB';
+const gridCfg = { color: 'rgba(143,165,212,0.07)', drawTicks: false };
+const tooltipCfg = {
+  backgroundColor: 'rgba(8,17,38,0.96)', borderColor: 'rgba(143,165,212,0.25)', borderWidth: 1,
+  titleColor: '#F1F5FB', bodyColor: '#8FA5D4', padding: 12, cornerRadius: 10, displayColors: false,
+  titleFont: { family: 'Syne', weight: '700', size: 14 }, bodyFont: { size: 13 },
+};
+
+const priceChart = new Chart($('priceChart'), {
+  type: 'line',
+  data: { datasets: [{
+    label: 'SOL', data: [], borderColor: '#F97316', borderWidth: 2,
+    pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: '#F97316',
+    tension: 0.05, fill: true,
+    backgroundColor: ctx => {
+      const { chart } = ctx; if (!chart.chartArea) return 'transparent';
+      const g = chart.ctx.createLinearGradient(0, chart.chartArea.top, 0, chart.chartArea.bottom);
+      g.addColorStop(0, 'rgba(249,115,22,0.30)'); g.addColorStop(1, 'rgba(249,115,22,0)');
+      return g;
+    },
+  }] },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { type: 'time', time: { unit: 'month', tooltipFormat: 'MMM d, yyyy' }, grid: { display: false },
+           border: { color: 'rgba(143,165,212,0.15)' }, ticks: { maxRotation: 0, autoSkipPadding: 30 } },
+      y: { type: 'linear', position: 'right', grid: gridCfg, border: { display: false },
+           ticks: { callback: v => '$' + (v >= 1000 ? compact(v) : v) } },
+    },
+    plugins: { legend: { display: false },
+               tooltip: { ...tooltipCfg, callbacks: { label: c => 'SOL  ' + price(c.parsed.y) } } },
+  },
+});
+
+const tpsChart = new Chart($('tpsChart'), {
+  type: 'line',
+  data: { datasets: [
+    { label: 'Total TPS',    data: [], borderColor: '#F97316', borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
+    { label: 'Non-vote TPS', data: [], borderColor: '#14F195', borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
+  ] },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { type: 'time', time: { tooltipFormat: 'HH:mm' }, grid: { display: false },
+           border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 40, font: { size: 10 } } },
+      y: { grid: gridCfg, border: { display: false }, ticks: { maxTicksLimit: 4, font: { size: 10 } } },
+    },
+    plugins: { legend: { display: false },
+               tooltip: { ...tooltipCfg, callbacks: { label: c => `${c.dataset.label}  ${nf(c.parsed.y)}` } } },
+  },
+});
+
+/* Small daily-trend cards, all driven off the pre-aggregated series in data.json. */
+const TRENDS = [
+  { key: 'ytd_transactions',        title: 'Daily Transactions',       color: '#38BDF8', fmt: compact, agg: 'last' },
+  { key: 'ytd_dex_volume',          title: 'Daily Spot DEX Volume',    color: '#14F195', fmt: usd,     agg: 'last' },
+  { key: 'perps',                   title: 'Daily Perps Volume',       color: '#A855F7', fmt: usd,     agg: 'last' },
+  { key: 'traders',                 title: 'Daily Active Traders',     color: '#F5A524', fmt: compact, agg: 'last' },
+  { key: 'stablecoin_supply',       title: 'Stablecoin Supply',        color: '#E9469A', fmt: usd,     agg: 'last' },
+  { key: 'tokenized_equity_volume', title: 'Tokenized Equity Volume',  color: '#6366F1', fmt: usd,     agg: 'last' },
+];
+
+function buildTrends(series) {
+  const grid = $('trendGrid');
+  grid.innerHTML = '';
+  for (const t of TRENDS) {
+    const pts = series[t.key];
+    if (!pts || !pts.length) continue;
+    const el = document.createElement('div');
+    el.className = 'panel';
+    const last = pts[pts.length - 1];
+    // Multi-year sparklines get year ticks; a YTD-only series gets months.
+    const spanDays = (new Date(last.d) - new Date(pts[0].d)) / 86400000;
+    const unit = spanDays > 400 ? 'year' : 'month';
+    el.innerHTML = `<h3>${t.title}</h3>
+      <div class="big num">${t.fmt(last.v)}</div>
+      <div class="note">Latest · ${fmtDate(last.d)}</div>
+      <div class="spark"><canvas role="img" aria-label="${t.title}"></canvas></div>`;
+    grid.appendChild(el);
+
+    new Chart(el.querySelector('canvas'), {
+      type: 'line',
+      data: { datasets: [{
+        label: t.title, data: pts.map(p => ({ x: p.d, y: p.v })),
+        borderColor: t.color, borderWidth: 1.6, pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: true,
+        backgroundColor: ctx => {
+          const { chart } = ctx; if (!chart.chartArea) return 'transparent';
+          const g = chart.ctx.createLinearGradient(0, chart.chartArea.top, 0, chart.chartArea.bottom);
+          g.addColorStop(0, t.color + '4D'); g.addColorStop(1, t.color + '00');
+          return g;
+        },
+      }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { type: 'time', time: { unit, tooltipFormat: 'MMM d, yyyy' }, grid: { display: false },
+               border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 34, font: { size: 10 } } },
+          y: { grid: gridCfg, border: { display: false }, beginAtZero: true,
+               ticks: { maxTicksLimit: 4, font: { size: 10 }, callback: v => t.fmt(v) } },
+        },
+        plugins: { legend: { display: false },
+                   tooltip: { ...tooltipCfg, callbacks: { label: c => t.fmt(c.parsed.y) } } },
+      },
+    });
+  }
+}
+
+/* ------------------------------------------------------- pre-aggregated data */
+async function loadData() {
+  try {
+    const r = await fetch(CONFIG.DATA, { cache: 'no-cache' });
+    if (!r.ok) throw new Error(`data.json HTTP ${r.status}`);
+    const d = await r.json();
+    const s = d.stats || {};
+    const yr = d.year || new Date().getUTCFullYear();
+
+    $('ytdYear').textContent = yr;
+    $('tpsYear').textContent = yr;
+    if (s.price_as_of) $('priceAsOf').textContent = 'close of ' + fmtDate(s.price_as_of);
+    if (s.price_as_of) $('ytdAsOf').textContent = `1 Jan – ${fmtDate(s.price_as_of)} · ${nf(s.ytd_transactions_days)} days`;
+
+    // price + returns
+    $('t_price').textContent = price(s.price);
+    $('t_price_sub').textContent = 'live quote';
+    setPct($('t_r3m'),  s.return_3m);
+    setPct($('t_rytd'), s.return_ytd);
+    setPct($('t_r1y'),  s.return_1y);
+    setPct($('t_r5y'),  s.return_5y);
+    $('t_rytd_sub').textContent = `vs. 31 Dec ${yr - 1} close`;
+
+    // YTD activity
+    $('t_txns').textContent = compact(s.ytd_transactions);
+    $('t_txns_sub').textContent = s.ytd_transactions_days
+      ? compact(s.ytd_transactions / s.ytd_transactions_days) + ' per day' : '';
+    $('t_tps').textContent = nf(s.avg_tps_ytd);
+    $('t_rev').textContent = usd(s.ytd_revenue_usd);
+    $('t_rev_sub').textContent = s.ytd_revenue_sol ? compact(s.ytd_revenue_sol) + ' SOL' : '';
+    $('t_stable').textContent = usd(s.stablecoin_supply);
+    setPct($('t_stable_sub'), s.stablecoin_supply_ytd_change);
+    $('t_stable_sub').textContent += ' YTD';
+    $('t_dex').textContent = usd(s.ytd_dex_volume);
+    $('t_fee').textContent = s.avg_fee_ytd != null ? '$' + s.avg_fee_ytd.toFixed(4) : '—';
+    $('t_fee_sub').textContent = s.ytd_fees_usd ? usd(s.ytd_fees_usd) + ' total' : '';
+    $('t_advol').textContent = usd(s.avg_daily_dex_volume_ytd);
+    $('t_tokeq').textContent = usd(s.tokenized_equity_supply);
+    $('t_tokeqvol').textContent = usd(s.ytd_tokenized_equity_volume);
+    $('t_traders').textContent = compact(s.avg_daily_traders_ytd);
+    $('t_perps').textContent = usd(s.ytd_perps_volume);
+
+    // charts
+    state.priceSeries = (d.series?.price || []).map(p => ({ x: p.d, y: p.v }));
+    drawPrice();
+    buildTrends(d.series || {});
+
+    if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
+    health.data = 'ok';
+  } catch (e) {
+    console.error('data.json load failed', e);
+    health.data = 'fail';
+    $('priceAsOf').textContent = 'data.json unavailable — run refresh_data.py';
+  }
+  paintHealth();
+}
+
+function drawPrice() {
+  let pts = state.priceSeries;
+  if (state.range === 'ytd') {
+    const jan1 = `${new Date().getUTCFullYear()}-01-01`;
+    pts = pts.filter(p => p.x >= jan1);
+  } else if (state.range !== 'all') {
+    const cutoff = new Date(Date.now() - Number(state.range) * 86400000).toISOString().slice(0, 10);
+    pts = pts.filter(p => p.x >= cutoff);
+  }
+  priceChart.data.datasets[0].data = pts;
+  priceChart.options.scales.y.type = state.scale;
+  priceChart.options.scales.x.time.unit = pts.length > 400 ? 'year' : pts.length > 120 ? 'month' : 'week';
+  priceChart.update();
+}
+
+/* ------------------------------------------------------------ live network */
+async function loadNetwork() {
+  try {
+    const [epochInfo, perf, inflation, version] = await Promise.all([
+      rpc('getEpochInfo'),
+      rpc('getRecentPerformanceSamples', [720]),
+      rpc('getInflationRate').catch(() => null),
+      rpc('getVersion').catch(() => null),
+    ]);
+
+    // Samples arrive newest-first; oldest-first reads better on a time axis.
+    const samples = (perf || []).slice().reverse();
+    const nowMs = Date.now();
+    const newest = samples.length ? samples[samples.length - 1].slot : 0;
+
+    const total = [], nonVote = [];
+    let sum = 0, peak = 0;
+    for (const s of samples) {
+      const secs = s.samplePeriodSecs || 60;
+      const t = s.numTransactions / secs, nv = s.numNonVoteTransactions / secs;
+      // Timestamp each sample by walking back from now using its own slot rate.
+      const ageSecs = ((newest - s.slot) / Math.max(s.numSlots, 1)) * secs;
+      const x = nowMs - ageSecs * 1000;
+      total.push({ x, y: t }); nonVote.push({ x, y: nv });
+      sum += t; peak = Math.max(peak, t);
+    }
+    tpsChart.data.datasets[0].data = total;
+    tpsChart.data.datasets[1].data = nonVote;
+    tpsChart.update();
+
+    const latest = samples[samples.length - 1];
+    if (latest) {
+      const secs = latest.samplePeriodSecs || 60;
+      $('tpsNow').textContent = nf(latest.numTransactions / secs);
+      $('tpsAvg').textContent = nf(sum / samples.length);
+      $('tpsPeak').textContent = nf(peak);
+    }
+
+    // Derive real slot time from recent samples instead of assuming 400ms.
+    const recent = samples.slice(-10);
+    const slotSec = recent.length
+      ? recent.reduce((a, s) => a + (s.samplePeriodSecs || 60) / Math.max(s.numSlots, 1), 0) / recent.length
+      : 0.4;
+
+    const pct = epochInfo.slotIndex / epochInfo.slotsInEpoch * 100;
+    $('epochBig').textContent = pct.toFixed(1) + '%';
+    $('epochBar').style.width = pct.toFixed(2) + '%';
+    $('epochEta').textContent = duration((epochInfo.slotsInEpoch - epochInfo.slotIndex) * slotSec) + ' remaining';
+    $('epochNum').textContent = nf(epochInfo.epoch);
+    $('slot').textContent = nf(epochInfo.absoluteSlot);
+    $('slotTime').textContent = (slotSec * 1000).toFixed(0) + ' ms';
+    $('blockHeight').textContent = nf(epochInfo.blockHeight);
+
+    if (inflation) {
+      state.inflation = inflation.total;
+      $('inflation').textContent = (inflation.total * 100).toFixed(2) + '%';
+    }
+    if (version) $('version').textContent = version['solana-core'];
+    health.net = 'ok';
+  } catch (e) {
+    console.error('network refresh failed', e);
+    health.net = 'fail';
+  }
+  paintHealth();
+}
+
+async function loadValidators() {
+  try {
+    const va = await rpc('getVoteAccounts');
+    const active = va.current || [], delinquent = va.delinquent || [];
+    $('t_vals').textContent = nf(active.length);
+    $('t_vals_sub').textContent = delinquent.length + ' delinquent';
+
+    const stakes = active.map(v => v.activatedStake / 1e9).sort((a, b) => b - a);
+    const totalStake = stakes.reduce((a, b) => a + b, 0);
+    $('stakeTotal').textContent = compact(totalStake) + ' SOL';
+
+    // Nakamoto coefficient: fewest validators whose stake exceeds one third.
+    let cum = 0, nk = 0;
+    for (const s of stakes) { cum += s; nk++; if (cum > totalStake / 3) break; }
+    $('nakamoto').textContent = nf(nk);
+
+    // getSupply is disabled on the public RPC, so scale against total stake's
+    // share of supply using the inflation-implied ratio where possible.
+    const supply = state.totalSupply;
+    if (supply) {
+      const ratio = totalStake / supply;
+      $('stakePct').textContent = (ratio * 100).toFixed(1) + '%';
+      if (state.inflation) $('yieldEst').textContent = (state.inflation / ratio * 100).toFixed(2) + '%';
+    }
+
+    const top = stakes.slice(0, 10);
+    $('topShare').textContent = (top.reduce((a, b) => a + b, 0) / totalStake * 100).toFixed(1) + '%';
+
+    const bar = $('stakebar'), leg = $('stakeLegend');
+    bar.innerHTML = ''; leg.innerHTML = '';
+    top.forEach((s, i) => {
+      const share = s / totalStake * 100;
+      const seg = document.createElement('i');
+      seg.style.width = share + '%';
+      seg.style.background = RAINBOW[i % RAINBOW.length];
+      seg.title = `#${i + 1} — ${compact(s)} SOL (${share.toFixed(2)}%)`;
+      bar.appendChild(seg);
+      const l = document.createElement('span');
+      l.className = 'leg';
+      l.innerHTML = `<span class="sw" style="background:${RAINBOW[i % RAINBOW.length]}"></span>#${i + 1} <span class="num" style="color:var(--peri)">${share.toFixed(2)}%</span>`;
+      leg.appendChild(l);
+    });
+    const restShare = 100 - top.reduce((a, b) => a + b, 0) / totalStake * 100;
+    const rest = document.createElement('i');
+    rest.style.width = restShare + '%';
+    rest.style.background = 'rgba(143,165,212,0.22)';
+    rest.title = `Remaining ${active.length - top.length} validators (${restShare.toFixed(2)}%)`;
+    bar.appendChild(rest);
+    const rl = document.createElement('span');
+    rl.className = 'leg';
+    rl.innerHTML = `<span class="sw" style="background:rgba(143,165,212,0.22)"></span>Other ${active.length - top.length} <span class="num" style="color:var(--peri)">${restShare.toFixed(2)}%</span>`;
+    leg.appendChild(rl);
+  } catch (e) {
+    console.error('validator refresh failed', e);
+  }
+}
+
+/* Total supply drives the staked-percentage figure; the public RPC blocks
+   getSupply, so derive it from inflation-adjusted genesis-free sources instead. */
+async function loadSupply() {
+  try {
+    const r = await fetch('https://api.coingecko.com/api/v3/coins/solana?localization=false&tickers=false&community_data=false&developer_data=false&sparkline=false');
+    if (!r.ok) throw new Error(`CoinGecko HTTP ${r.status}`);
+    const j = await r.json();
+    state.totalSupply = j.market_data?.total_supply || null;
+  } catch (e) {
+    console.warn('supply lookup failed; staked % will stay blank', e);
+  }
+}
+
+/* -------------------------------------------------------------- controls */
+document.querySelectorAll('[data-range]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-range]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+  state.range = b.dataset.range;
+  drawPrice();
+}));
+document.querySelectorAll('[data-scale]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-scale]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+  state.scale = b.dataset.scale;
+  drawPrice();
+}));
+
+/* ------------------------------------------------------------------- boot */
+(async function boot() {
+  await Promise.all([loadData(), loadNetwork(), loadSupply()]);
+  await loadValidators();
+  setInterval(async () => { await loadNetwork(); loadValidators(); }, CONFIG.NET_REFRESH_MS);
+})();
+</script>
+</body>
+</html>
