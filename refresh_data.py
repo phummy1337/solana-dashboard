@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""Build data.json for the Solana dashboard.
+
+Runs server-side (locally or in CI) so the Blockworks API key never reaches the
+browser. Live keyless data — TPS, epoch, validators — is fetched client-side
+instead and is deliberately not duplicated here.
+
+Usage:
+    BLOCKWORKS_API_KEY=... python3 refresh_data.py
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import ssl
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+# The python.org macOS builds ship no system roots, so HTTPS fails with
+# CERTIFICATE_VERIFY_FAILED. Prefer certifi's bundle when it is installed.
+try:
+    import certifi
+
+    _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CTX = ssl.create_default_context()
+
+BW_BASE = "https://api.blockworks.com"
+BW_KEY = os.environ.get("BLOCKWORKS_API_KEY", "").strip()
+OUT = Path(__file__).parent / "data.json"
+
+YEAR = date.today().year
+YTD_START = date(YEAR, 1, 1)
+PREV_YEAR_END = f"{YEAR - 1}-12-31"
+
+# Blockworks Analytics chart ids, resolved from /v1/charts?search=... . Titles are
+# recorded so a renamed or re-pointed chart is obvious on the next refresh.
+CHARTS = {
+    "rev":        (103,   "Solana: Network REV"),
+    "traders":    (9185,  "Solana: Daily Active Traders"),
+    "perps":      (8907,  "Solana: Perp DEXs — Futures Notional Volume"),
+    "tokeq_vol":  (10634, "Solana: Tokenized Equities Volume by Token Issuer"),
+    "tokeq_sup":  (10631, "Solana: Tokenized Equities Supply"),
+}
+
+warnings: list[str] = []
+
+
+def warn(msg: str) -> None:
+    warnings.append(msg)
+    print(f"  !! {msg}", file=sys.stderr)
+
+
+# The edge in front of the API answers 403 to the default Python-urllib agent.
+UA = "solana-dashboard/1.0 (+refresh_data.py)"
+
+
+def get(url: str, headers: dict | None = None, tries: int = 3) -> dict | list:
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json", **(headers or {})})
+    last = None
+    for attempt in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=90, context=_SSL_CTX) as r:
+                return json.loads(r.read().decode())
+        except Exception as e:  # noqa: BLE001 - retry any transport/parse failure
+            last = e
+            if attempt < tries - 1:
+                time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"GET {url.split('?')[0]} failed: {last}")
+
+
+def bw(path: str, **params) -> dict | list:
+    if not BW_KEY:
+        raise RuntimeError("BLOCKWORKS_API_KEY is not set")
+    url = f"{BW_BASE}/{path.lstrip('/')}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    return get(url, {"x-api-key": BW_KEY})
+
+
+def metric(slug: str, project: str = "solana") -> dict[str, float]:
+    """Return {date: value} for a /v1/metrics series."""
+    d = bw(f"v1/metrics/{slug}", project=project)
+    rows = d.get(project) or []
+    return {r["date"]: r["value"] for r in rows if r.get("value") is not None}
+
+
+def chart_rows(chart_id: int, stop_before: str | None = None, page_size: int = 5000) -> list[dict]:
+    """Fetch chart rows newest-first, stopping early once past stop_before."""
+    out: list[dict] = []
+    page = 1
+    while True:
+        d = bw(f"v1/charts/{chart_id}/data", limit=page_size, page=page)
+        rows = d.get("data") or []
+        out.extend(rows)
+        total = d.get("total", 0)
+        if not rows or len(out) >= total:
+            break
+        if stop_before:
+            oldest = min((row_date(r) or "9999") for r in rows)
+            if oldest < stop_before:
+                break
+        page += 1
+        if page > 40:  # safety valve; 40 * 5000 rows is far beyond any chart here
+            warn(f"chart {chart_id}: stopped paginating at page {page}")
+            break
+    return out
+
+
+def row_date(r: dict) -> str | None:
+    """Charts label their date column inconsistently — normalise to YYYY-MM-DD."""
+    for k in ("date", "dt", "block_date", "day", "timestamp"):
+        if k in r and r[k]:
+            return str(r[k])[:10]
+    return None
+
+
+def ytd(series: dict[str, float]) -> dict[str, float]:
+    return {d: v for d, v in series.items() if d >= YTD_START.isoformat()}
+
+
+def at_or_before(series: dict[str, float], target: date, window: int = 10) -> float | None:
+    """Nearest value at or before target, tolerating gaps in the series."""
+    for back in range(window + 1):
+        key = (target.fromordinal(target.toordinal() - back)).isoformat()
+        if key in series:
+            return series[key]
+    return None
+
+
+def main() -> int:
+    print("Refreshing Solana dashboard data...")
+    data: dict = {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "year": YEAR,
+        "stats": {},
+        "series": {},
+        "sources": {"blockworks_charts": {k: {"id": v[0], "title": v[1]} for k, v in CHARTS.items()}},
+    }
+    stats = data["stats"]
+
+    # ---------------------------------------------------------------- price
+    prices: dict[str, float] = {}
+    try:
+        prices = metric("token-price-usd")
+        print(f"  price series: {len(prices)} days")
+    except Exception as e:  # noqa: BLE001
+        warn(f"price series: {e}")
+
+    spot = None
+    try:
+        spot = bw("v1/assets/solana/price").get("usd")
+        print(f"  spot price: ${spot}")
+    except Exception as e:  # noqa: BLE001
+        warn(f"spot price: {e}")
+
+    if prices:
+        latest_date = max(prices)
+        # Prefer the live spot quote; fall back to the last daily close.
+        current = spot if spot else prices[latest_date]
+        stats["price"] = current
+        stats["price_as_of"] = latest_date
+        # Full history, so the chart's "All" range is honest — it only costs a
+        # few hundred extra points over a 5-year clip.
+        data["series"]["price"] = [{"d": d, "v": prices[d]} for d in sorted(prices)]
+
+        today = date.today()
+        windows = {
+            "return_3m": at_or_before(prices, date.fromordinal(today.toordinal() - 91)),
+            "return_ytd": prices.get(PREV_YEAR_END) or at_or_before(prices, date(YEAR - 1, 12, 31)),
+            "return_1y": at_or_before(prices, date.fromordinal(today.toordinal() - 365)),
+            "return_5y": at_or_before(prices, date.fromordinal(today.toordinal() - 1826)),
+        }
+        for k, base in windows.items():
+            stats[k] = ((current / base) - 1) * 100 if base else None
+            if base is None:
+                warn(f"{k}: no baseline price found")
+
+    # ------------------------------------------------------- network volume
+    def sum_metric(slug: str, key: str, also_series: bool = False) -> dict[str, float]:
+        try:
+            s = metric(slug)
+            y = ytd(s)
+            stats[key] = sum(y.values())
+            stats[f"{key}_days"] = len(y)
+            if also_series:
+                data["series"][key] = [{"d": d, "v": s[d]} for d in sorted(s) if d >= f"{YEAR - 2}-01-01"]
+            print(f"  {slug}: YTD {stats[key]:,.0f} over {len(y)} days")
+            return s
+        except Exception as e:  # noqa: BLE001
+            warn(f"{slug}: {e}")
+            stats[key] = None
+            return {}
+
+    txns = sum_metric("transaction-total", "ytd_transactions", also_series=True)
+    fees_usd = sum_metric("transaction-fee-total-usd", "ytd_fees_usd")
+    dex = sum_metric("dex-spot-volume-total-usd", "ytd_dex_volume", also_series=True)
+
+    # Average TPS across the year so far, measured against elapsed wall-clock
+    # rather than a nominal 365 days.
+    if txns and stats.get("ytd_transactions"):
+        days = len(ytd(txns))
+        if days:
+            stats["avg_tps_ytd"] = stats["ytd_transactions"] / (days * 86400)
+
+    # Volume-weighted, not a mean of daily averages.
+    if stats.get("ytd_fees_usd") and stats.get("ytd_transactions"):
+        stats["avg_fee_ytd"] = stats["ytd_fees_usd"] / stats["ytd_transactions"]
+
+    if stats.get("ytd_dex_volume") and stats.get("ytd_dex_volume_days"):
+        stats["avg_daily_dex_volume_ytd"] = stats["ytd_dex_volume"] / stats["ytd_dex_volume_days"]
+
+    # ---------------------------------------------------- stablecoin supply
+    try:
+        s = metric("stablecoin-supply-total-usd")
+        if s:
+            stats["stablecoin_supply"] = s[max(s)]
+            stats["stablecoin_supply_as_of"] = max(s)
+            ytd_open = s.get(PREV_YEAR_END) or at_or_before(s, date(YEAR - 1, 12, 31), 30)
+            if ytd_open:
+                stats["stablecoin_supply_ytd_change"] = ((stats["stablecoin_supply"] / ytd_open) - 1) * 100
+            data["series"]["stablecoin_supply"] = [
+                {"d": d, "v": s[d]} for d in sorted(s) if d >= f"{YEAR - 2}-01-01"
+            ]
+            print(f"  stablecoin supply: ${stats['stablecoin_supply']:,.0f}")
+    except Exception as e:  # noqa: BLE001
+        warn(f"stablecoin-supply-total-usd: {e}")
+
+    # ------------------------------------------------------------ REV (SOL)
+    # Chart 103 is denominated in SOL, verified against transaction-fee-total-usd:
+    # (vote + base + priority) fees x daily close matched the USD metric to 0.03%.
+    try:
+        rows = chart_rows(*[CHARTS["rev"][0]], stop_before=f"{YEAR}-01-01")
+        rev_sol = 0.0
+        rev_usd = 0.0
+        seen = set()
+        for r in rows:
+            d = row_date(r)
+            if not d or d < YTD_START.isoformat() or d in seen:
+                continue
+            v = r.get("rev")
+            if v is None:
+                continue
+            seen.add(d)
+            rev_sol += v
+            rev_usd += v * prices.get(d, prices.get(max(prices)) if prices else 0)
+        stats["ytd_revenue_sol"] = rev_sol
+        stats["ytd_revenue_usd"] = rev_usd
+        print(f"  YTD REV: {rev_sol:,.0f} SOL / ${rev_usd:,.0f} over {len(seen)} days")
+    except Exception as e:  # noqa: BLE001
+        warn(f"network REV chart: {e}")
+
+    # -------------------------------------------------------- active traders
+    try:
+        rows = chart_rows(CHARTS["traders"][0], stop_before=f"{YEAR}-01-01")
+        vals = {}
+        for r in rows:
+            d = row_date(r)
+            if d and d >= YTD_START.isoformat() and r.get("unique_traders") is not None:
+                vals[d] = r["unique_traders"]
+        if vals:
+            stats["avg_daily_traders_ytd"] = sum(vals.values()) / len(vals)
+            data["series"]["traders"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
+            print(f"  avg daily traders YTD: {stats['avg_daily_traders_ytd']:,.0f} over {len(vals)} days")
+    except Exception as e:  # noqa: BLE001
+        warn(f"daily active traders chart: {e}")
+
+    # ----------------------------------------------------------- perps volume
+    try:
+        rows = chart_rows(CHARTS["perps"][0], stop_before=f"{YEAR}-01-01")
+        # The series carries one row per symbol plus a rolled-up "Total" row;
+        # summing everything would double count.
+        vals = {}
+        for r in rows:
+            d = row_date(r)
+            if d and d >= YTD_START.isoformat() and r.get("symbol") == "Total" and r.get("vol_totals") is not None:
+                vals[d] = r["vol_totals"]
+        if vals:
+            stats["ytd_perps_volume"] = sum(vals.values())
+            stats["ytd_perps_days"] = len(vals)
+            data["series"]["perps"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
+            print(f"  YTD perps volume: ${stats['ytd_perps_volume']:,.0f} over {len(vals)} days")
+        else:
+            warn("perps chart: no rows with symbol='Total' in YTD range")
+    except Exception as e:  # noqa: BLE001
+        warn(f"perps chart: {e}")
+
+    # ------------------------------------------------------ tokenized equity
+    try:
+        rows = chart_rows(CHARTS["tokeq_vol"][0], stop_before=f"{YEAR}-01-01")
+        vals: dict[str, float] = {}
+        for r in rows:
+            d = row_date(r)
+            if d and d >= YTD_START.isoformat() and r.get("volume_usd") is not None:
+                # Rows are per-issuer, so accumulate rather than assign.
+                vals[d] = vals.get(d, 0) + r["volume_usd"]
+        if vals:
+            stats["ytd_tokenized_equity_volume"] = sum(vals.values())
+            data["series"]["tokenized_equity_volume"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
+            print(f"  YTD tokenized equity volume: ${stats['ytd_tokenized_equity_volume']:,.0f}")
+    except Exception as e:  # noqa: BLE001
+        warn(f"tokenized equity volume chart: {e}")
+
+    try:
+        rows = chart_rows(CHARTS["tokeq_sup"][0])
+        supply = {}
+        for r in rows:
+            d = row_date(r)
+            v = r.get("circulating_supply_usd")
+            if d and v is not None:
+                supply[d] = v
+        if supply:
+            stats["tokenized_equity_supply"] = supply[max(supply)]
+            stats["tokenized_equity_as_of"] = max(supply)
+            data["series"]["tokenized_equity_supply"] = [{"d": d, "v": v} for d, v in sorted(supply.items())]
+            print(f"  tokenized equity supply: ${stats['tokenized_equity_supply']:,.0f} ({max(supply)})")
+        else:
+            warn("tokenized equity supply chart: all values null")
+    except Exception as e:  # noqa: BLE001
+        warn(f"tokenized equity supply chart: {e}")
+
+    data["warnings"] = warnings
+    OUT.write_text(json.dumps(data, separators=(",", ":")))
+    print(f"\nWrote {OUT} ({OUT.stat().st_size:,} bytes) — {len(warnings)} warning(s)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
