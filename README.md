@@ -7,10 +7,14 @@ type and chrome, so the two sites read as siblings.
 ## Layout
 
 1. **Price & Returns** — spot price, 3-month, YTD, 1-year and 5-year returns.
-2. **Year-to-Date** — twelve tiles covering transactions, TPS, revenue, stablecoin
-   supply, DEX volume, average fee, validators, average daily volume, tokenized
-   equity supply and volume, daily traders, and perps volume.
-3. **SOL Price History** — 3M/YTD/1Y/5Y/All with a linear/log toggle.
+2. **Daily Snapshot / Year-to-Date** — twelve tiles covering transactions, TPS,
+   revenue, stablecoin supply, DEX volume, average fee, validators, volume vs.
+   average, tokenized equity supply and volume, traders, and perps volume.
+   A toggle switches between the latest complete day (default) and YTD totals.
+3. **SOL Price History** — 3M/YTD/1Y/5Y/All with a linear/log toggle, plus a
+   **SOL Rainbow** overlay reproducing solanarainbow.com's power-law bands
+   (constants lifted from its source; fair-value and top-band values verified
+   identical). Enabling it defaults the scale to log, like the source site.
 4. **Activity Trends** — daily sparklines for the six series above.
 5. **Live Network Health** — epoch progress, 12h throughput, stake and yield,
    and top-validator stake distribution.
