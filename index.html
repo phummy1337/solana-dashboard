@@ -149,25 +149,15 @@
   <div class="tile"><div class="k">5-Year Return</div><div class="v num" id="t_r5y">—</div><div class="s">vs. 1,826 days ago</div></div>
 </section>
 
-<!-- ------------------------------------------------------------------ YTD -->
+<!-- ------------------------------------------------- network activity tiles -->
 <div class="shead">
-  <h2><span id="ytdYear">2026</span> Year-to-Date</h2><span class="rule"></span>
+  <h2 id="actTitle">Daily Snapshot</h2>
+  <button class="tgl" data-mode="daily" aria-pressed="true">Daily</button>
+  <button class="tgl" data-mode="ytd" aria-pressed="false">YTD</button>
+  <span class="rule"></span>
   <span class="asof" id="ytdAsOf"></span>
 </div>
-<section class="tiles">
-  <div class="tile"><div class="k">YTD Transactions</div><div class="v num" id="t_txns">—</div><div class="s num" id="t_txns_sub">—</div></div>
-  <div class="tile"><div class="k">Avg. TPS <span id="tpsYear">2026</span></div><div class="v num" id="t_tps">—</div><div class="s">incl. vote transactions</div></div>
-  <div class="tile"><div class="k">YTD Revenue</div><div class="v num" id="t_rev">—</div><div class="s num" id="t_rev_sub">—</div></div>
-  <div class="tile"><div class="k">Stablecoin Supply</div><div class="v num" id="t_stable">—</div><div class="s num" id="t_stable_sub">—</div></div>
-  <div class="tile"><div class="k">YTD DEX Volume</div><div class="v num" id="t_dex">—</div><div class="s">spot, all DEXs</div></div>
-  <div class="tile"><div class="k">Avg. Transaction Fee YTD</div><div class="v num" id="t_fee">—</div><div class="s num" id="t_fee_sub">—</div></div>
-  <div class="tile"><div class="k">Active Validators</div><div class="v num" id="t_vals">—</div><div class="s num" id="t_vals_sub">live</div></div>
-  <div class="tile"><div class="k">Avg. Daily Trading Volume YTD</div><div class="v num" id="t_advol">—</div><div class="s">spot DEX per day</div></div>
-  <div class="tile"><div class="k">Tokenized Equity</div><div class="v num" id="t_tokeq">—</div><div class="s">on-chain supply</div></div>
-  <div class="tile"><div class="k">YTD Tokenized Equity Volume</div><div class="v num" id="t_tokeqvol">—</div><div class="s">by token issuer</div></div>
-  <div class="tile"><div class="k">Avg. Daily Traders</div><div class="v num" id="t_traders">—</div><div class="s">unique, per day YTD</div></div>
-  <div class="tile"><div class="k">YTD Perps Volume</div><div class="v num" id="t_perps">—</div><div class="s">futures notional</div></div>
-</section>
+<section class="tiles" id="activityTiles"></section>
 
 <!-- ---------------------------------------------------------- price chart -->
 <div class="shead"><h2>SOL Price History</h2><span class="rule"></span></div>
@@ -178,6 +168,7 @@
   <button class="tgl" data-range="365"  aria-pressed="false">1Y</button>
   <button class="tgl" data-range="1826" aria-pressed="false">5Y</button>
   <button class="tgl" data-range="all"  aria-pressed="false">All</button>
+  <button class="tgl" id="rainbowBtn" aria-pressed="false" style="margin-left:10px">🌈 SOL Rainbow</button>
   <span class="spacer"></span>
   <span class="ctl-label">Scale</span>
   <button class="tgl" data-scale="linear" aria-pressed="true">Linear</button>
@@ -185,6 +176,7 @@
 </div>
 <section class="stage">
   <div class="wrap"><canvas id="priceChart" role="img" aria-label="SOL price history"></canvas></div>
+  <div class="legend" id="rbLegend" style="display:none; justify-content:center; margin-top:10px"></div>
 </section>
 
 <!-- ------------------------------------------------------- activity trend -->
@@ -316,7 +308,37 @@ async function rpc(method, params = []) {
 }
 
 /* -------------------------------------------------------------------- state */
-const state = { range: 'ytd', scale: 'linear', priceSeries: [], totalSupply: null, inflation: null };
+const state = { range: 'ytd', scale: 'linear', priceSeries: [], totalSupply: null, inflation: null,
+                mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
+                validators: null, rainbow: false, preRainbowScale: 'linear' };
+
+/* ------------------------------------------------------- rainbow band model */
+// Power-law growth bands, constants lifted verbatim from solanarainbow.com:
+// h grows 0.12/yr from launch (floored at 0.7), the fair-value trend is
+// 10^(1.2 + 4.5·log10 h), and each band is offset by 10^(idx·0.79^(h+1)/3).
+const RB = {
+  LAUNCH: Date.UTC(2020, 2, 16),
+  KEYS: [-3, -2, -1, 0, 1, 2, 3, 4, 5],
+  COLORS: { '-3':'#9400D3', '-2':'#6D28D9', '-1':'#3B82F6', '0':'#22C55E',
+            '1':'#EAB308', '2':'#F97316', '3':'#EF4444', '4':'#EC4899', '5':'#F9A8D4' },
+  NAMES:  { '-3':'Buy Everything', '-2':'Back Up the Truck', '-1':'Accumulate',
+            '0':'Fair Value', '1':'Getting Spicy', '2':'Frothy', '3':'FOMO',
+            '4':'Take Profits', '5':'Sell Immediately' },
+};
+function bandAt(dateStr, idx) {
+  const yrs = (Date.parse(dateStr + 'T00:00:00Z') - RB.LAUNCH) / 86400000 / 365.25;
+  const h = Math.max(0.7, 0.7 + yrs * 0.12);
+  const trend = Math.pow(10, 1.2 + 4.5 * Math.log10(h));
+  return idx === 0 ? trend : trend * Math.pow(10, idx * Math.pow(0.79, h + 1) / 3);
+}
+function zoneFor(dateStr, close) {
+  const vals = RB.KEYS.map(k => bandAt(dateStr, k));
+  if (close < vals[0]) return 'Below “' + RB.NAMES['-3'] + '”';
+  for (let j = 0; j < vals.length - 1; j++)
+    if (close >= vals[j] && close < vals[j + 1])
+      return RB.NAMES[String(RB.KEYS[j])] + ' → ' + RB.NAMES[String(RB.KEYS[j + 1])];
+  return 'Above “' + RB.NAMES['5'] + '”';
+}
 
 /* -------------------------------------------------------------------- charts */
 Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -351,9 +373,21 @@ const priceChart = new Chart($('priceChart'), {
            ticks: { callback: v => '$' + (v >= 1000 ? compact(v) : v) } },
     },
     plugins: { legend: { display: false },
-               tooltip: { ...tooltipCfg, callbacks: { label: c => 'SOL  ' + price(c.parsed.y) } } },
+               tooltip: { ...tooltipCfg,
+                 // Nine band datasets would drown the tooltip; show the price
+                 // line only, plus the rainbow zone as a footer when it's on.
+                 filter: item => item.dataset.label === 'SOL',
+                 callbacks: {
+                   label: c => 'SOL  ' + price(c.parsed.y),
+                   afterBody: items => {
+                     if (!state.rainbow || !items.length) return '';
+                     const p = items[0].raw;
+                     return 'Zone: ' + zoneFor(p.x, p.y);
+                   },
+                 } } },
   },
 });
+const priceDs = priceChart.data.datasets[0];
 
 const tpsChart = new Chart($('tpsChart'), {
   type: 'line',
@@ -437,12 +471,11 @@ async function loadData() {
     if (!r.ok) throw new Error(`data.json HTTP ${r.status}`);
     const d = await r.json();
     const s = d.stats || {};
-    const yr = d.year || new Date().getUTCFullYear();
+    state.stats = s;
+    state.daily = d.daily || {};
+    state.year = d.year || new Date().getUTCFullYear();
 
-    $('ytdYear').textContent = yr;
-    $('tpsYear').textContent = yr;
     if (s.price_as_of) $('priceAsOf').textContent = 'close of ' + fmtDate(s.price_as_of);
-    if (s.price_as_of) $('ytdAsOf').textContent = `1 Jan – ${fmtDate(s.price_as_of)} · ${nf(s.ytd_transactions_days)} days`;
 
     // price + returns
     $('t_price').textContent = price(s.price);
@@ -451,26 +484,9 @@ async function loadData() {
     setPct($('t_rytd'), s.return_ytd);
     setPct($('t_r1y'),  s.return_1y);
     setPct($('t_r5y'),  s.return_5y);
-    $('t_rytd_sub').textContent = `vs. 31 Dec ${yr - 1} close`;
+    $('t_rytd_sub').textContent = `vs. 31 Dec ${state.year - 1} close`;
 
-    // YTD activity
-    $('t_txns').textContent = compact(s.ytd_transactions);
-    $('t_txns_sub').textContent = s.ytd_transactions_days
-      ? compact(s.ytd_transactions / s.ytd_transactions_days) + ' per day' : '';
-    $('t_tps').textContent = nf(s.avg_tps_ytd);
-    $('t_rev').textContent = usd(s.ytd_revenue_usd);
-    $('t_rev_sub').textContent = s.ytd_revenue_sol ? compact(s.ytd_revenue_sol) + ' SOL' : '';
-    $('t_stable').textContent = usd(s.stablecoin_supply);
-    setPct($('t_stable_sub'), s.stablecoin_supply_ytd_change);
-    $('t_stable_sub').textContent += ' YTD';
-    $('t_dex').textContent = usd(s.ytd_dex_volume);
-    $('t_fee').textContent = s.avg_fee_ytd != null ? '$' + s.avg_fee_ytd.toFixed(4) : '—';
-    $('t_fee_sub').textContent = s.ytd_fees_usd ? usd(s.ytd_fees_usd) + ' total' : '';
-    $('t_advol').textContent = usd(s.avg_daily_dex_volume_ytd);
-    $('t_tokeq').textContent = usd(s.tokenized_equity_supply);
-    $('t_tokeqvol').textContent = usd(s.ytd_tokenized_equity_volume);
-    $('t_traders').textContent = compact(s.avg_daily_traders_ytd);
-    $('t_perps').textContent = usd(s.ytd_perps_volume);
+    renderTiles();
 
     // charts
     state.priceSeries = (d.series?.price || []).map(p => ({ x: p.d, y: p.v }));
@@ -487,6 +503,62 @@ async function loadData() {
   paintHealth();
 }
 
+/* ------------------------------------------------------------ activity tiles */
+function renderTiles() {
+  const s = state.stats, dm = state.daily, yr = state.year, mode = state.mode;
+  $('actTitle').textContent = mode === 'daily' ? 'Daily Snapshot' : `${yr} Year-to-Date`;
+  $('ytdAsOf').textContent = mode === 'daily'
+    ? (dm.as_of ? 'latest complete day · ' + fmtDate(dm.as_of) : '')
+    : (s.price_as_of ? `1 Jan – ${fmtDate(s.price_as_of)} · ${nf(s.ytd_transactions_days)} days` : '');
+
+  const pctHtml = n => n == null || !isFinite(n) ? ''
+    : `<span class="${n >= 0 ? 'up' : 'down'}">${(n >= 0 ? '+' : '') + n.toFixed(2)}%</span> YTD`;
+  const stableSub = pctHtml(s.stablecoin_supply_ytd_change);
+  const ytdAvgTx = s.ytd_transactions_days ? s.ytd_transactions / s.ytd_transactions_days : null;
+  // Escaped-free strings only below — everything interpolated is our own numbers.
+  const T = mode === 'daily' ? [
+    ['Transactions (24h)', compact(dm.transactions), ytdAvgTx ? compact(ytdAvgTx) + ' YTD avg / day' : ''],
+    ['Avg. TPS (24h)', nf(dm.tps), 'incl. vote transactions'],
+    ['Revenue (24h)', usd(dm.revenue_usd), dm.revenue_sol ? compact(dm.revenue_sol) + ' SOL' : ''],
+    ['Stablecoin Supply', usd(s.stablecoin_supply), stableSub],
+    ['DEX Volume (24h)', usd(dm.dex_volume), 'spot, all DEXs'],
+    ['Avg. Transaction Fee (24h)', dm.fee_avg != null ? '$' + dm.fee_avg.toFixed(4) : '—',
+      dm.fees_usd ? usd(dm.fees_usd) + ' total' : ''],
+    ['Active Validators', '<span id="t_vals">—</span>', '<span id="t_vals_sub">live</span>'],
+    ['DEX Volume vs. YTD Avg', dm.dex_volume && s.avg_daily_dex_volume_ytd
+      ? (dm.dex_volume / s.avg_daily_dex_volume_ytd).toFixed(2) + '×' : '—',
+      s.avg_daily_dex_volume_ytd ? usd(s.avg_daily_dex_volume_ytd) + ' YTD avg / day' : ''],
+    ['Tokenized Equity', usd(s.tokenized_equity_supply), 'on-chain supply'],
+    ['Tokenized Equity Volume (24h)', usd(dm.tokenized_equity_volume), 'by token issuer'],
+    ['Active Traders (24h)', compact(dm.traders), 'unique wallets'],
+    ['Perps Volume (24h)', usd(dm.perps_volume), 'futures notional'],
+  ] : [
+    ['YTD Transactions', compact(s.ytd_transactions), ytdAvgTx ? compact(ytdAvgTx) + ' per day' : ''],
+    [`Avg. TPS ${yr}`, nf(s.avg_tps_ytd), 'incl. vote transactions'],
+    ['YTD Revenue', usd(s.ytd_revenue_usd), s.ytd_revenue_sol ? compact(s.ytd_revenue_sol) + ' SOL' : ''],
+    ['Stablecoin Supply', usd(s.stablecoin_supply), stableSub],
+    ['YTD DEX Volume', usd(s.ytd_dex_volume), 'spot, all DEXs'],
+    ['Avg. Transaction Fee YTD', s.avg_fee_ytd != null ? '$' + s.avg_fee_ytd.toFixed(4) : '—',
+      s.ytd_fees_usd ? usd(s.ytd_fees_usd) + ' total' : ''],
+    ['Active Validators', '<span id="t_vals">—</span>', '<span id="t_vals_sub">live</span>'],
+    ['Avg. Daily Trading Volume YTD', usd(s.avg_daily_dex_volume_ytd), 'spot DEX per day'],
+    ['Tokenized Equity', usd(s.tokenized_equity_supply), 'on-chain supply'],
+    ['YTD Tokenized Equity Volume', usd(s.ytd_tokenized_equity_volume), 'by token issuer'],
+    ['Avg. Daily Traders', compact(s.avg_daily_traders_ytd), 'unique, per day YTD'],
+    ['YTD Perps Volume', usd(s.ytd_perps_volume), 'futures notional'],
+  ];
+  $('activityTiles').innerHTML = T.map(([k, v, sub]) =>
+    `<div class="tile"><div class="k">${k}</div><div class="v num">${v}</div><div class="s num">${sub || '&nbsp;'}</div></div>`
+  ).join('');
+  applyValidators();
+}
+function applyValidators() {
+  if (!state.validators) return;
+  const v = $('t_vals'), sub = $('t_vals_sub');
+  if (v) v.textContent = nf(state.validators.active);
+  if (sub) sub.textContent = state.validators.delinquent + ' delinquent';
+}
+
 function drawPrice() {
   let pts = state.priceSeries;
   if (state.range === 'ytd') {
@@ -496,10 +568,29 @@ function drawPrice() {
     const cutoff = new Date(Date.now() - Number(state.range) * 86400000).toISOString().slice(0, 10);
     pts = pts.filter(p => p.x >= cutoff);
   }
-  priceChart.data.datasets[0].data = pts;
+  priceDs.data = pts;
+  priceDs.order = 10;                       // higher order draws later — price stays on top
+  const sets = [priceDs];
+  if (state.rainbow) {
+    for (const k of RB.KEYS) sets.push({
+      label: RB.NAMES[String(k)],
+      data: pts.map(p => ({ x: p.x, y: bandAt(p.x, k) })),
+      borderColor: RB.COLORS[String(k)], borderWidth: 1.4,
+      pointRadius: 0, pointHoverRadius: 0, tension: 0, fill: false, order: 1,
+    });
+  }
+  priceChart.data.datasets = sets;
   priceChart.options.scales.y.type = state.scale;
   priceChart.options.scales.x.time.unit = pts.length > 400 ? 'year' : pts.length > 120 ? 'month' : 'week';
   priceChart.update();
+
+  const leg = $('rbLegend');
+  leg.style.display = state.rainbow ? 'flex' : 'none';
+  if (state.rainbow && !leg.childElementCount) {
+    leg.innerHTML = RB.KEYS.map(k =>
+      `<span class="leg"><span class="sw" style="background:${RB.COLORS[String(k)]}"></span>${RB.NAMES[String(k)]}</span>`
+    ).join('');
+  }
 }
 
 /* ------------------------------------------------------------ live network */
@@ -572,8 +663,8 @@ async function loadValidators() {
   try {
     const va = await rpc('getVoteAccounts');
     const active = va.current || [], delinquent = va.delinquent || [];
-    $('t_vals').textContent = nf(active.length);
-    $('t_vals_sub').textContent = delinquent.length + ' delinquent';
+    state.validators = { active: active.length, delinquent: delinquent.length };
+    applyValidators();
 
     const stakes = active.map(v => v.activatedStake / 1e9).sort((a, b) => b - a);
     const totalStake = stakes.reduce((a, b) => a + b, 0);
@@ -649,6 +740,25 @@ document.querySelectorAll('[data-scale]').forEach(b => b.addEventListener('click
   state.scale = b.dataset.scale;
   drawPrice();
 }));
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-mode]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+  state.mode = b.dataset.mode;
+  renderTiles();
+}));
+function setScale(scale) {
+  state.scale = scale;
+  document.querySelectorAll('[data-scale]').forEach(o =>
+    o.setAttribute('aria-pressed', String(o.dataset.scale === scale)));
+}
+$('rainbowBtn').addEventListener('click', () => {
+  state.rainbow = !state.rainbow;
+  $('rainbowBtn').setAttribute('aria-pressed', String(state.rainbow));
+  // The bands are exponential curves — mirror the source site by defaulting to
+  // log while the rainbow is up, and restore the prior scale on the way out.
+  if (state.rainbow) { state.preRainbowScale = state.scale; setScale('logarithmic'); }
+  else setScale(state.preRainbowScale);
+  drawPrice();
+});
 
 /* ------------------------------------------------------------------- boot */
 (async function boot() {

@@ -144,6 +144,10 @@ def main() -> int:
         "sources": {"blockworks_charts": {k: {"id": v[0], "title": v[1]} for k, v in CHARTS.items()}},
     }
     stats = data["stats"]
+    # Latest-complete-day readings for the dashboard's Daily view. Each value is
+    # taken at its own series' newest date; Blockworks lands them together, so
+    # in practice they share the date recorded in daily["as_of"].
+    daily: dict = {}
 
     # ---------------------------------------------------------------- price
     prices: dict[str, float] = {}
@@ -202,6 +206,19 @@ def main() -> int:
     fees_usd = sum_metric("transaction-fee-total-usd", "ytd_fees_usd")
     dex = sum_metric("dex-spot-volume-total-usd", "ytd_dex_volume", also_series=True)
 
+    if txns:
+        d0 = max(txns)
+        daily["as_of"] = d0
+        daily["transactions"] = txns[d0]
+        daily["tps"] = txns[d0] / 86400
+    if fees_usd:
+        d0 = max(fees_usd)
+        daily["fees_usd"] = fees_usd[d0]
+        if txns.get(d0):
+            daily["fee_avg"] = fees_usd[d0] / txns[d0]
+    if dex:
+        daily["dex_volume"] = dex[max(dex)]
+
     # Average TPS across the year so far, measured against elapsed wall-clock
     # rather than a nominal 365 days.
     if txns and stats.get("ytd_transactions"):
@@ -237,22 +254,24 @@ def main() -> int:
     # (vote + base + priority) fees x daily close matched the USD metric to 0.03%.
     try:
         rows = chart_rows(*[CHARTS["rev"][0]], stop_before=f"{YEAR}-01-01")
-        rev_sol = 0.0
-        rev_usd = 0.0
-        seen = set()
+        rev_by: dict[str, float] = {}
         for r in rows:
             d = row_date(r)
-            if not d or d < YTD_START.isoformat() or d in seen:
+            if not d or d < YTD_START.isoformat() or d in rev_by:
                 continue
             v = r.get("rev")
-            if v is None:
-                continue
-            seen.add(d)
-            rev_sol += v
-            rev_usd += v * prices.get(d, prices.get(max(prices)) if prices else 0)
+            if v is not None:
+                rev_by[d] = v
+        rev_sol = sum(rev_by.values())
+        rev_usd = sum(v * prices.get(d, prices.get(max(prices)) if prices else 0)
+                      for d, v in rev_by.items())
         stats["ytd_revenue_sol"] = rev_sol
         stats["ytd_revenue_usd"] = rev_usd
-        print(f"  YTD REV: {rev_sol:,.0f} SOL / ${rev_usd:,.0f} over {len(seen)} days")
+        if rev_by:
+            d0 = max(rev_by)
+            daily["revenue_sol"] = rev_by[d0]
+            daily["revenue_usd"] = rev_by[d0] * prices.get(d0, prices.get(max(prices)) if prices else 0)
+        print(f"  YTD REV: {rev_sol:,.0f} SOL / ${rev_usd:,.0f} over {len(rev_by)} days")
     except Exception as e:  # noqa: BLE001
         warn(f"network REV chart: {e}")
 
@@ -266,6 +285,7 @@ def main() -> int:
                 vals[d] = r["unique_traders"]
         if vals:
             stats["avg_daily_traders_ytd"] = sum(vals.values()) / len(vals)
+            daily["traders"] = vals[max(vals)]
             data["series"]["traders"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
             print(f"  avg daily traders YTD: {stats['avg_daily_traders_ytd']:,.0f} over {len(vals)} days")
     except Exception as e:  # noqa: BLE001
@@ -284,6 +304,7 @@ def main() -> int:
         if vals:
             stats["ytd_perps_volume"] = sum(vals.values())
             stats["ytd_perps_days"] = len(vals)
+            daily["perps_volume"] = vals[max(vals)]
             data["series"]["perps"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
             print(f"  YTD perps volume: ${stats['ytd_perps_volume']:,.0f} over {len(vals)} days")
         else:
@@ -302,6 +323,7 @@ def main() -> int:
                 vals[d] = vals.get(d, 0) + r["volume_usd"]
         if vals:
             stats["ytd_tokenized_equity_volume"] = sum(vals.values())
+            daily["tokenized_equity_volume"] = vals[max(vals)]
             data["series"]["tokenized_equity_volume"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
             print(f"  YTD tokenized equity volume: ${stats['ytd_tokenized_equity_volume']:,.0f}")
     except Exception as e:  # noqa: BLE001
@@ -325,6 +347,7 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         warn(f"tokenized equity supply chart: {e}")
 
+    data["daily"] = daily
     data["warnings"] = warnings
     OUT.write_text(json.dumps(data, separators=(",", ":")))
     print(f"\nWrote {OUT} ({OUT.stat().st_size:,} bytes) — {len(warnings)} warning(s)")
