@@ -310,7 +310,7 @@ async function rpc(method, params = []) {
 /* -------------------------------------------------------------------- state */
 const state = { range: 'ytd', scale: 'linear', priceSeries: [], totalSupply: null, inflation: null,
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
-                validators: null, rainbow: false, preRainbowScale: 'linear' };
+                rainbow: false, preRainbowScale: 'linear' };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -516,22 +516,24 @@ function renderTiles() {
   const stableSub = pctHtml(s.stablecoin_supply_ytd_change);
   const ytdAvgTx = s.ytd_transactions_days ? s.ytd_transactions / s.ytd_transactions_days : null;
   // Escaped-free strings only below — everything interpolated is our own numbers.
+  // "Total Trading Volume" is spot DEX + perps futures notional combined.
+  const tradedDaily = dm.dex_volume != null && dm.perps_volume != null
+    ? dm.dex_volume + dm.perps_volume : null;
+  const tradedYtd = s.ytd_dex_volume != null && s.ytd_perps_volume != null
+    ? s.ytd_dex_volume + s.ytd_perps_volume : null;
   const T = mode === 'daily' ? [
-    ['Transactions (24h)', compact(dm.transactions), ytdAvgTx ? compact(ytdAvgTx) + ' YTD avg / day' : ''],
-    ['Avg. TPS (24h)', nf(dm.tps), 'incl. vote transactions'],
-    ['Revenue (24h)', usd(dm.revenue_usd), dm.revenue_sol ? compact(dm.revenue_sol) + ' SOL' : ''],
+    ['Transactions', compact(dm.transactions), ytdAvgTx ? compact(ytdAvgTx) + ' YTD avg / day' : ''],
+    ['Avg. TPS', nf(dm.tps), 'incl. vote transactions'],
+    ['Revenue', usd(dm.revenue_usd), dm.revenue_sol ? compact(dm.revenue_sol) + ' SOL' : ''],
     ['Stablecoin Supply', usd(s.stablecoin_supply), stableSub],
-    ['DEX Volume (24h)', usd(dm.dex_volume), 'spot, all DEXs'],
-    ['Avg. Transaction Fee (24h)', dm.fee_avg != null ? '$' + dm.fee_avg.toFixed(4) : '—',
+    ['DEX Volume', usd(dm.dex_volume), 'spot, all DEXs'],
+    ['Avg. Transaction Fee', dm.fee_avg != null ? '$' + dm.fee_avg.toFixed(4) : '—',
       dm.fees_usd ? usd(dm.fees_usd) + ' total' : ''],
-    ['Active Validators', '<span id="t_vals">—</span>', '<span id="t_vals_sub">live</span>'],
-    ['DEX Volume vs. YTD Avg', dm.dex_volume && s.avg_daily_dex_volume_ytd
-      ? (dm.dex_volume / s.avg_daily_dex_volume_ytd).toFixed(2) + '×' : '—',
-      s.avg_daily_dex_volume_ytd ? usd(s.avg_daily_dex_volume_ytd) + ' YTD avg / day' : ''],
+    ['Total Trading Volume', usd(tradedDaily), 'spot + perps'],
     ['Tokenized Equity', usd(s.tokenized_equity_supply), 'on-chain supply'],
-    ['Tokenized Equity Volume (24h)', usd(dm.tokenized_equity_volume), 'by token issuer'],
-    ['Active Traders (24h)', compact(dm.traders), 'unique wallets'],
-    ['Perps Volume (24h)', usd(dm.perps_volume), 'futures notional'],
+    ['Tokenized Equity Volume', usd(dm.tokenized_equity_volume), ''],
+    ['Active Traders', compact(dm.traders), 'unique wallets'],
+    ['Perps Volume', usd(dm.perps_volume), 'futures notional'],
   ] : [
     ['YTD Transactions', compact(s.ytd_transactions), ytdAvgTx ? compact(ytdAvgTx) + ' per day' : ''],
     [`Avg. TPS ${yr}`, nf(s.avg_tps_ytd), 'incl. vote transactions'],
@@ -540,23 +542,15 @@ function renderTiles() {
     ['YTD DEX Volume', usd(s.ytd_dex_volume), 'spot, all DEXs'],
     ['Avg. Transaction Fee YTD', s.avg_fee_ytd != null ? '$' + s.avg_fee_ytd.toFixed(4) : '—',
       s.ytd_fees_usd ? usd(s.ytd_fees_usd) + ' total' : ''],
-    ['Active Validators', '<span id="t_vals">—</span>', '<span id="t_vals_sub">live</span>'],
-    ['Avg. Daily Trading Volume YTD', usd(s.avg_daily_dex_volume_ytd), 'spot DEX per day'],
+    ['Total Trading Volume', usd(tradedYtd), 'spot + perps'],
     ['Tokenized Equity', usd(s.tokenized_equity_supply), 'on-chain supply'],
-    ['YTD Tokenized Equity Volume', usd(s.ytd_tokenized_equity_volume), 'by token issuer'],
+    ['YTD Tokenized Equity Volume', usd(s.ytd_tokenized_equity_volume), ''],
     ['Avg. Daily Traders', compact(s.avg_daily_traders_ytd), 'unique, per day YTD'],
     ['YTD Perps Volume', usd(s.ytd_perps_volume), 'futures notional'],
   ];
   $('activityTiles').innerHTML = T.map(([k, v, sub]) =>
     `<div class="tile"><div class="k">${k}</div><div class="v num">${v}</div><div class="s num">${sub || '&nbsp;'}</div></div>`
   ).join('');
-  applyValidators();
-}
-function applyValidators() {
-  if (!state.validators) return;
-  const v = $('t_vals'), sub = $('t_vals_sub');
-  if (v) v.textContent = nf(state.validators.active);
-  if (sub) sub.textContent = state.validators.delinquent + ' delinquent';
 }
 
 function drawPrice() {
@@ -662,9 +656,7 @@ async function loadNetwork() {
 async function loadValidators() {
   try {
     const va = await rpc('getVoteAccounts');
-    const active = va.current || [], delinquent = va.delinquent || [];
-    state.validators = { active: active.length, delinquent: delinquent.length };
-    applyValidators();
+    const active = va.current || [];
 
     const stakes = active.map(v => v.activatedStake / 1e9).sort((a, b) => b - a);
     const totalStake = stakes.reduce((a, b) => a + b, 0);
