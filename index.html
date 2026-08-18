@@ -220,26 +220,13 @@
       <div class="row"><span>Slot</span><b class="num" id="slot">—</b></div>
       <div class="row"><span>Avg slot time</span><b class="num" id="slotTime">—</b></div>
       <div class="row"><span>Block height</span><b class="num" id="blockHeight">—</b></div>
-      <div class="row"><span>All-time transactions</span><b class="num" id="allTimeTx">—</b></div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <h3>Block Production — this epoch</h3>
-    <div class="big"><span class="num" id="skipRate">—</span></div>
-    <div class="note">of leader slots skipped, cluster-wide</div>
-    <div class="rows">
-      <div class="row"><span>Leader slots played</span><b class="num" id="leaderSlots">—</b></div>
-      <div class="row"><span>Blocks produced</span><b class="num" id="blocksProduced">—</b></div>
-      <div class="row"><span>Slots skipped</span><b class="num" id="skippedSlots">—</b></div>
-      <div class="row"><span>Gossip nodes</span><b class="num" id="gossipNodes">—</b></div>
     </div>
   </div>
 
   <div class="panel">
     <h3>Throughput — last 12h</h3>
     <div class="big"><span class="num" id="tpsNow">—</span></div>
-    <div class="note">Live TPS · 12h avg <span class="num" id="tpsAvg">—</span> · peak <span class="num" id="tpsPeak">—</span> · <span class="num" id="voteShare">—</span> non-vote</div>
+    <div class="note">Live TPS · 12h avg <span class="num" id="tpsAvg">—</span> · peak <span class="num" id="tpsPeak">—</span></div>
     <div class="spark"><canvas id="tpsChart" role="img" aria-label="Transactions per second, last 12 hours"></canvas></div>
     <div class="legend">
       <span class="leg"><span class="sw" style="background:var(--orange)"></span>Total TPS</span>
@@ -255,8 +242,6 @@
       <div class="row"><span>Est. staking yield</span><b class="num" id="yieldEst">—</b></div>
       <div class="row"><span>Inflation rate</span><b class="num" id="inflation">—</b></div>
       <div class="row"><span>Nakamoto coefficient</span><b class="num" id="nakamoto">—</b></div>
-      <div class="row"><span>Stake-wtd. commission</span><b class="num" id="commission">—</b></div>
-      <div class="row"><span>Delinquent stake</span><b class="num" id="delinquentStake">—</b></div>
       <div class="row"><span>Client version</span><b class="num" id="version">—</b></div>
     </div>
   </div>
@@ -633,12 +618,11 @@ function drawPrice() {
 /* ------------------------------------------------------------ live network */
 async function loadNetwork() {
   try {
-    const [epochInfo, perf, inflation, version, blockProd] = await Promise.all([
+    const [epochInfo, perf, inflation, version] = await Promise.all([
       rpc('getEpochInfo'),
       rpc('getRecentPerformanceSamples', [720]),
       rpc('getInflationRate').catch(() => null),
       rpc('getVersion').catch(() => null),
-      rpc('getBlockProduction').catch(() => null),
     ]);
 
     // Samples arrive newest-first; oldest-first reads better on a time axis.
@@ -667,10 +651,6 @@ async function loadNetwork() {
       $('tpsNow').textContent = nf(latest.numTransactions / secs);
       $('tpsAvg').textContent = nf(sum / samples.length);
       $('tpsPeak').textContent = nf(peak);
-      // Vote transactions dominate raw TPS; show how much is real user traffic.
-      const txTotal = samples.reduce((a, s) => a + s.numTransactions, 0);
-      const txNonVote = samples.reduce((a, s) => a + s.numNonVoteTransactions, 0);
-      if (txTotal) $('voteShare').textContent = (txNonVote / txTotal * 100).toFixed(0) + '%';
     }
 
     // Derive real slot time from recent samples instead of assuming 400ms.
@@ -688,20 +668,6 @@ async function loadNetwork() {
     $('slotTime').textContent = (slotSec * 1000).toFixed(0) + ' ms';
     $('blockHeight').textContent = nf(epochInfo.blockHeight);
 
-    if (epochInfo.transactionCount != null) $('allTimeTx').textContent = compact(epochInfo.transactionCount);
-
-    if (blockProd?.value?.byIdentity) {
-      const perLeader = Object.values(blockProd.value.byIdentity);
-      const leaderSlots = perLeader.reduce((a, [ls]) => a + ls, 0);
-      const produced = perLeader.reduce((a, [, bp]) => a + bp, 0);
-      if (leaderSlots) {
-        $('skipRate').textContent = ((leaderSlots - produced) / leaderSlots * 100).toFixed(2) + '%';
-        $('leaderSlots').textContent = nf(leaderSlots);
-        $('blocksProduced').textContent = nf(produced);
-        $('skippedSlots').textContent = nf(leaderSlots - produced);
-      }
-    }
-
     if (inflation) {
       state.inflation = inflation.total;
       $('inflation').textContent = (inflation.total * 100).toFixed(2) + '%';
@@ -718,20 +684,11 @@ async function loadNetwork() {
 async function loadValidators() {
   try {
     const va = await rpc('getVoteAccounts');
-    const active = va.current || [], delinquent = va.delinquent || [];
+    const active = va.current || [];
 
     const stakes = active.map(v => v.activatedStake / 1e9).sort((a, b) => b - a);
     const totalStake = stakes.reduce((a, b) => a + b, 0);
     $('stakeTotal').textContent = compact(totalStake) + ' SOL';
-
-    // Stake-weighted commission over active validators, and how much stake is
-    // currently delinquent (far more telling than the delinquent head-count).
-    if (totalStake) {
-      const wc = active.reduce((a, v) => a + (v.activatedStake / 1e9) * v.commission, 0) / totalStake;
-      $('commission').textContent = wc.toFixed(1) + '%';
-      const dStake = delinquent.reduce((a, v) => a + v.activatedStake / 1e9, 0);
-      $('delinquentStake').textContent = (dStake / (totalStake + dStake) * 100).toFixed(3) + '%';
-    }
 
     // Nakamoto coefficient: fewest validators whose stake exceeds one third.
     let cum = 0, nk = 0;
@@ -823,22 +780,10 @@ $('rainbowBtn').addEventListener('click', () => {
   drawPrice();
 });
 
-/* getClusterNodes returns ~1.6MB, so fetch it once per page load rather than
-   in the 30-second refresh loop. */
-async function loadClusterSize() {
-  try {
-    const nodes = await rpc('getClusterNodes');
-    if (Array.isArray(nodes)) $('gossipNodes').textContent = nf(nodes.length);
-  } catch (e) {
-    console.warn('cluster nodes lookup failed', e);
-  }
-}
-
 /* ------------------------------------------------------------------- boot */
 (async function boot() {
   await Promise.all([loadData(), loadNetwork(), loadSupply()]);
   await loadValidators();
-  loadClusterSize();
   setInterval(async () => { await loadNetwork(); loadValidators(); }, CONFIG.NET_REFRESH_MS);
 })();
 </script>
