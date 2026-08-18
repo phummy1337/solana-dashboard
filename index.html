@@ -83,6 +83,18 @@
   .stage .wrap { position: relative; height: 44vh; min-height: 320px; max-height: 460px; }
   .stage canvas { width: 100% !important; height: 100% !important; }
 
+  /* Side-by-side: activity tiles left, price chart right. The chart column
+     flexes so the canvas grows to match the tile column's height. */
+  .split { display: grid; grid-template-columns: minmax(360px, 5fr) 7fr; gap: 0 28px; padding: 0 48px; }
+  .split .shead, .split .tiles, .split .controls, .split .stage { padding-left: 0; padding-right: 0; }
+  .split-right { display: flex; flex-direction: column; }
+  .split-right .stage { flex: 1; display: flex; flex-direction: column; }
+  .split-right .stage .wrap { flex: 1; height: auto; min-height: 360px; max-height: none; }
+  @media (max-width: 1180px) {
+    .split { grid-template-columns: 1fr; }
+    .split-right .stage .wrap { flex: none; height: 44vh; min-height: 320px; max-height: 460px; }
+  }
+
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; padding: 14px 48px 0; }
   .panel { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 17px 19px; }
   .panel h3 { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--mute); }
@@ -111,7 +123,7 @@
   a { color: var(--peri); }
 
   @media (max-width: 760px) {
-    header, .shead, .tiles, .controls, .stage, .grid, footer { padding-left: 18px; padding-right: 18px; }
+    header, .shead, .tiles, .controls, .stage, .grid, .split, footer { padding-left: 18px; padding-right: 18px; }
     header { flex-direction: column; }
     /* The nowrap "as of" stamp overflows a phone; drop it to its own line. */
     .shead { flex-wrap: wrap; row-gap: 3px; }
@@ -149,35 +161,39 @@
   <div class="tile"><div class="k">5-Year Return</div><div class="v num" id="t_r5y">—</div><div class="s">vs. 1,826 days ago</div></div>
 </section>
 
-<!-- ------------------------------------------------- network activity tiles -->
-<div class="shead">
-  <h2 id="actTitle">Daily Snapshot</h2>
-  <button class="tgl" data-mode="daily" aria-pressed="true">Daily</button>
-  <button class="tgl" data-mode="ytd" aria-pressed="false">YTD</button>
-  <span class="rule"></span>
-  <span class="asof" id="ytdAsOf"></span>
+<!-- -------------------------- activity tiles (left) · price chart (right) -->
+<div class="split">
+  <div class="split-left">
+    <div class="shead">
+      <h2 id="actTitle">Daily Snapshot</h2>
+      <button class="tgl" data-mode="daily" aria-pressed="true">Daily</button>
+      <button class="tgl" data-mode="ytd" aria-pressed="false">YTD</button>
+      <span class="rule"></span>
+      <span class="asof" id="ytdAsOf"></span>
+    </div>
+    <section class="tiles" id="activityTiles"></section>
+  </div>
+  <div class="split-right">
+    <div class="shead"><h2>SOL Price History</h2><span class="rule"></span></div>
+    <div class="controls">
+      <span class="ctl-label">Range</span>
+      <button class="tgl" data-range="90"   aria-pressed="false">3M</button>
+      <button class="tgl" data-range="ytd"  aria-pressed="true">YTD</button>
+      <button class="tgl" data-range="365"  aria-pressed="false">1Y</button>
+      <button class="tgl" data-range="1826" aria-pressed="false">5Y</button>
+      <button class="tgl" data-range="all"  aria-pressed="false">All</button>
+      <button class="tgl" id="rainbowBtn" aria-pressed="false" style="margin-left:10px">🌈 SOL Rainbow</button>
+      <span class="spacer"></span>
+      <span class="ctl-label">Scale</span>
+      <button class="tgl" data-scale="linear" aria-pressed="true">Linear</button>
+      <button class="tgl" data-scale="logarithmic" aria-pressed="false">Log</button>
+    </div>
+    <section class="stage">
+      <div class="wrap"><canvas id="priceChart" role="img" aria-label="SOL price history"></canvas></div>
+      <div class="legend" id="rbLegend" style="display:none; justify-content:center; margin-top:10px"></div>
+    </section>
+  </div>
 </div>
-<section class="tiles" id="activityTiles"></section>
-
-<!-- ---------------------------------------------------------- price chart -->
-<div class="shead"><h2>SOL Price History</h2><span class="rule"></span></div>
-<div class="controls">
-  <span class="ctl-label">Range</span>
-  <button class="tgl" data-range="90"   aria-pressed="false">3M</button>
-  <button class="tgl" data-range="ytd"  aria-pressed="true">YTD</button>
-  <button class="tgl" data-range="365"  aria-pressed="false">1Y</button>
-  <button class="tgl" data-range="1826" aria-pressed="false">5Y</button>
-  <button class="tgl" data-range="all"  aria-pressed="false">All</button>
-  <button class="tgl" id="rainbowBtn" aria-pressed="false" style="margin-left:10px">🌈 SOL Rainbow</button>
-  <span class="spacer"></span>
-  <span class="ctl-label">Scale</span>
-  <button class="tgl" data-scale="linear" aria-pressed="true">Linear</button>
-  <button class="tgl" data-scale="logarithmic" aria-pressed="false">Log</button>
-</div>
-<section class="stage">
-  <div class="wrap"><canvas id="priceChart" role="img" aria-label="SOL price history"></canvas></div>
-  <div class="legend" id="rbLegend" style="display:none; justify-content:center; margin-top:10px"></div>
-</section>
 
 <!-- ------------------------------------------------------- activity trend -->
 <div class="shead"><h2>Activity Trends</h2><span class="rule"></span><span class="asof">daily · Blockworks</span></div>
