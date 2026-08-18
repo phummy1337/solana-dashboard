@@ -233,6 +233,29 @@ def main() -> int:
     if stats.get("ytd_dex_volume") and stats.get("ytd_dex_volume_days"):
         stats["avg_daily_dex_volume_ytd"] = stats["ytd_dex_volume"] / stats["ytd_dex_volume_days"]
 
+    # ----------------------------------------------------------- DeFi TVL
+    # Blockworks carries no Solana chain-TVL series, so this one comes from
+    # DefiLlama (keyless). TVL is a level, not a flow: the tile shows the
+    # current reading in both modes, with the YTD change as context.
+    try:
+        rows = get("https://api.llama.fi/v2/historicalChainTvl/Solana")
+        tvl = {
+            datetime.fromtimestamp(r["date"], tz=timezone.utc).date().isoformat(): r["tvl"]
+            for r in rows if r.get("tvl") is not None
+        }
+        if tvl:
+            stats["defi_tvl"] = tvl[max(tvl)]
+            stats["defi_tvl_as_of"] = max(tvl)
+            ytd_open = tvl.get(PREV_YEAR_END) or at_or_before(tvl, date(YEAR - 1, 12, 31), 30)
+            if ytd_open:
+                stats["defi_tvl_ytd_change"] = ((stats["defi_tvl"] / ytd_open) - 1) * 100
+            data["series"]["defi_tvl"] = [
+                {"d": d, "v": tvl[d]} for d in sorted(tvl) if d >= f"{YEAR - 2}-01-01"
+            ]
+            print(f"  DeFi TVL: ${stats['defi_tvl']:,.0f} ({max(tvl)})")
+    except Exception as e:  # noqa: BLE001
+        warn(f"defillama tvl: {e}")
+
     # ---------------------------------------------------- stablecoin supply
     try:
         s = metric("stablecoin-supply-total-usd")
