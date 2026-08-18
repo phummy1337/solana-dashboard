@@ -561,7 +561,7 @@ function renderTiles() {
     ? s.ytd_dex_volume + s.ytd_perps_volume : null;
   const T = mode === 'daily' ? [
     ['Avg. TPS', nf(dm.tps), 'incl. vote transactions'],
-    ['Transactions', compact(dm.transactions), ytdAvgTx ? compact(ytdAvgTx) + ' YTD avg / day' : ''],
+    ['Transactions', compact(dm.transactions), ''],
     ['Avg. Transaction Fee', dm.fee_avg != null ? '$' + dm.fee_avg.toFixed(4) : '—',
       dm.fees_usd ? usd(dm.fees_usd) + ' total' : ''],
     ['Revenue', usd(dm.revenue_usd), dm.revenue_sol ? compact(dm.revenue_sol) + ' SOL' : ''],
