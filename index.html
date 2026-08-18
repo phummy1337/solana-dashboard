@@ -246,6 +246,19 @@
     </div>
   </div>
 
+  <div class="panel">
+    <h3>Network Uptime</h3>
+    <div class="big"><span class="num" id="up1">—</span></div>
+    <div class="note" id="lastOutage">past 12 months</div>
+    <div class="rows">
+      <div class="row"><span>Past 2 years</span><b class="num" id="up2">—</b></div>
+      <div class="row"><span>Past 3 years</span><b class="num" id="up3">—</b></div>
+      <div class="row"><span>Past 4 years</span><b class="num" id="up4">—</b></div>
+      <div class="row"><span>Past 5 years</span><b class="num" id="up5">—</b></div>
+      <div class="row"><span>Since mainnet-beta (2020)</span><b class="num" id="upAll">—</b></div>
+    </div>
+  </div>
+
   <div class="panel" style="grid-column: 1 / -1;">
     <h3>Stake Distribution — top validators</h3>
     <div class="big"><span class="num" id="topShare">—</span></div>
@@ -780,8 +793,49 @@ $('rainbowBtn').addEventListener('click', () => {
   drawPrice();
 });
 
+/* ------------------------------------------------------------ uptime panel */
+// Documented full mainnet-beta outages (Helius, "A Complete History of Solana
+// Outages"). Degraded-performance periods with no halt (Jan 2022) are excluded.
+// No RPC reports this, so it's a static record — extend it if a new outage
+// ever lands. Dates are outage start (UTC), duration in hours.
+const OUTAGES = [
+  { date: '2020-12-04', hours: 6,   cause: 'Turbine block-propagation bug' },
+  { date: '2021-09-14', hours: 17,  cause: 'Grape IDO bot flood' },
+  { date: '2022-04-30', hours: 8,   cause: 'Candy Machine NFT mint spam' },
+  { date: '2022-06-01', hours: 4.5, cause: 'durable nonce bug' },
+  { date: '2022-09-30', hours: 8.5, cause: 'fork-choice bug' },
+  { date: '2023-02-25', hours: 19,  cause: 'oversized block' },
+  { date: '2024-02-06', hours: 5,   cause: 'JIT cache recompile loop' },
+];
+const MAINNET_BETA = Date.parse('2020-03-16T00:00:00Z');
+
+function renderUptime() {
+  const now = Date.now();
+  const HOUR = 3600000;
+  const pct = sinceMs => {
+    const windowH = (now - sinceMs) / HOUR;
+    const down = OUTAGES.reduce((a, o) =>
+      Date.parse(o.date + 'T00:00:00Z') >= sinceMs ? a + o.hours : a, 0);
+    const p = (1 - down / windowH) * 100;
+    return down === 0 ? '100%' : p.toFixed(3) + '%';
+  };
+  const yearsAgo = n => now - n * 365.25 * 24 * HOUR;
+  $('up1').textContent = pct(yearsAgo(1));
+  $('up2').textContent = pct(yearsAgo(2));
+  $('up3').textContent = pct(yearsAgo(3));
+  $('up4').textContent = pct(yearsAgo(4));
+  $('up5').textContent = pct(yearsAgo(5));
+  $('upAll').textContent = pct(MAINNET_BETA);
+
+  const last = OUTAGES[OUTAGES.length - 1];
+  const days = Math.floor((now - Date.parse(last.date + 'T00:00:00Z')) / 86400000);
+  $('lastOutage').textContent =
+    `past 12 months · last outage ${fmtDate(last.date)} (${nf(days)} days ago)`;
+}
+
 /* ------------------------------------------------------------------- boot */
 (async function boot() {
+  renderUptime();
   await Promise.all([loadData(), loadNetwork(), loadSupply()]);
   await loadValidators();
   setInterval(async () => { await loadNetwork(); loadValidators(); }, CONFIG.NET_REFRESH_MS);
