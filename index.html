@@ -439,6 +439,7 @@ const TRENDS = [
   { key: 'perps',                   title: 'Daily Perps Volume',       color: '#A855F7', fmt: usd,     agg: 'last' },
   { key: 'traders',                 title: 'Daily Active Traders',     color: '#F5A524', fmt: compact, agg: 'last' },
   { key: 'stablecoin_supply',       title: 'Stablecoin Supply',        color: '#E9469A', fmt: usd,     agg: 'last' },
+  { key: 'defi_tvl',                title: 'DeFi TVL',                 color: '#4ADE80', fmt: usd,     agg: 'last' },
   { key: 'tokenized_equity_volume', title: 'Tokenized Equity Volume',  color: '#6366F1', fmt: usd,     agg: 'last' },
 ];
 
@@ -538,6 +539,7 @@ function renderTiles() {
   const pctHtml = n => n == null || !isFinite(n) ? ''
     : `<span class="${n >= 0 ? 'up' : 'down'}">${(n >= 0 ? '+' : '') + n.toFixed(2)}%</span> YTD`;
   const stableSub = pctHtml(s.stablecoin_supply_ytd_change);
+  const tvlSub = pctHtml(s.defi_tvl_ytd_change);
   const ytdAvgTx = s.ytd_transactions_days ? s.ytd_transactions / s.ytd_transactions_days : null;
   // Escaped-free strings only below — everything interpolated is our own numbers.
   // "Total Trading Volume" is spot DEX + perps futures notional combined.
@@ -550,6 +552,7 @@ function renderTiles() {
     ['Avg. TPS', nf(dm.tps), 'incl. vote transactions'],
     ['Revenue', usd(dm.revenue_usd), dm.revenue_sol ? compact(dm.revenue_sol) + ' SOL' : ''],
     ['Stablecoin Supply', usd(s.stablecoin_supply), stableSub],
+    ['DeFi TVL', usd(s.defi_tvl), tvlSub],
     ['DEX Volume', usd(dm.dex_volume), 'spot, all DEXs'],
     ['Avg. Transaction Fee', dm.fee_avg != null ? '$' + dm.fee_avg.toFixed(4) : '—',
       dm.fees_usd ? usd(dm.fees_usd) + ' total' : ''],
@@ -563,6 +566,7 @@ function renderTiles() {
     [`Avg. TPS ${yr}`, nf(s.avg_tps_ytd), 'incl. vote transactions'],
     ['YTD Revenue', usd(s.ytd_revenue_usd), s.ytd_revenue_sol ? compact(s.ytd_revenue_sol) + ' SOL' : ''],
     ['Stablecoin Supply', usd(s.stablecoin_supply), stableSub],
+    ['DeFi TVL', usd(s.defi_tvl), tvlSub],
     ['YTD DEX Volume', usd(s.ytd_dex_volume), 'spot, all DEXs'],
     ['Avg. Transaction Fee YTD', s.avg_fee_ytd != null ? '$' + s.avg_fee_ytd.toFixed(4) : '—',
       s.ytd_fees_usd ? usd(s.ytd_fees_usd) + ' total' : ''],
