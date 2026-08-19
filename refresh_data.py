@@ -49,6 +49,12 @@ CHARTS = {
     "tokeq_sup":  (10631, "Solana: Tokenized Equities Supply"),
 }
 
+# Comparison set for the Activity Trends charts: Solana vs the major L1/L2s.
+# Blockworks metric slugs on the left; DefiLlama chain names on the right.
+COMPARE_CHAINS = ["solana", "ethereum", "base", "arbitrum", "bnb"]
+LLAMA_SLUGS = {"solana": "Solana", "ethereum": "Ethereum", "base": "Base",
+               "arbitrum": "Arbitrum", "bnb": "BSC"}
+
 warnings: list[str] = []
 
 
@@ -370,6 +376,49 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         warn(f"tokenized equity supply chart: {e}")
 
+    # ------------------------------------------------- cross-chain comparisons
+    # Multi-project series for the trend charts. Kept separate from "series"
+    # so the single-chain cards stay untouched.
+    compare: dict = {}
+    since = f"{YEAR - 2}-01-01"
+
+    def compare_metric(slug: str, key: str) -> None:
+        try:
+            d = bw(f"v1/metrics/{slug}", project=",".join(COMPARE_CHAINS))
+            out = {}
+            for chain in COMPARE_CHAINS:
+                rows = d.get(chain) or []
+                pts = [{"d": r["date"], "v": r["value"]} for r in sorted(rows, key=lambda r: r["date"])
+                       if r.get("value") is not None and r["date"] >= since]
+                if pts:
+                    out[chain] = pts
+            if out:
+                compare[key] = out
+                print(f"  compare {slug}: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+        except Exception as e:  # noqa: BLE001
+            warn(f"compare {slug}: {e}")
+
+    compare_metric("transaction-total", "transactions")
+    compare_metric("dex-spot-volume-total-usd", "dex_volume")
+    compare_metric("stablecoin-supply-total-usd", "stablecoin_supply")
+
+    try:
+        out = {}
+        for chain, slug in LLAMA_SLUGS.items():
+            rows = get(f"https://api.llama.fi/v2/historicalChainTvl/{slug}")
+            pts = [{"d": datetime.fromtimestamp(r["date"], tz=timezone.utc).date().isoformat(),
+                    "v": r["tvl"]}
+                   for r in rows if r.get("tvl")]
+            pts = [p for p in pts if p["d"] >= since]
+            if pts:
+                out[chain] = pts
+        if out:
+            compare["defi_tvl"] = out
+            print("  compare defi-tvl: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+    except Exception as e:  # noqa: BLE001
+        warn(f"compare defillama tvl: {e}")
+
+    data["compare"] = compare
     data["daily"] = daily
     data["warnings"] = warnings
     OUT.write_text(json.dumps(data, separators=(",", ":")))
