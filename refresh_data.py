@@ -481,11 +481,21 @@ def main() -> int:
             k = (p["project"], sym)
             if k not in best or p["tvlUsd"] > best[k]["tvlUsd"]:
                 best[k] = p
+        # Platform homepages, for the linked Platform column. Referral query
+        # strings (DefiLlama tags some URLs) are stripped.
+        proto_urls: dict = {}
+        try:
+            proto_urls = {p.get("slug"): (p.get("url") or "").split("?")[0]
+                          for p in get("https://api.llama.fi/protocols")}
+        except Exception as e:  # noqa: BLE001
+            warn(f"protocol urls: {e}")
+
         items = [{
             "symbol": s, "project": proj, "tvl": round(p["tvlUsd"]),
             "apy": round(p.get("apy") or 0, 2), "apy30d": round(p.get("apyMean30d") or 0, 2),
+            "url": proto_urls.get(proj) or None,
         } for (proj, s), p in best.items()]
-        items.sort(key=lambda x: -x["apy"])
+        items.sort(key=lambda x: -x["apy30d"])
 
         apyx_pool = next((p for p in pools if p.get("pool") == APYX_POOL_ID), None)
         apyusd = None
@@ -495,6 +505,7 @@ def main() -> int:
                 "apy": round(apyx_pool.get("apy") or 0, 2),
                 "apy30d": round(apyx_pool.get("apyMean30d") or 0, 2),
                 "tvl_protocol": round(apyx_pool.get("tvlUsd") or 0),
+                "url": proto_urls.get("apyx-protocol") or "https://app.apyx.fi",
             }
             try:
                 supply = get("https://apyusd-supply.apxusd-supply-1337.workers.dev/")

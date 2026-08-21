@@ -131,6 +131,8 @@
   .ytable td .sym { color: var(--ink); font-weight: 700; }
   .ytable td .tag { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
                     color: #12100B; background: var(--orange); border-radius: 8px; padding: 2px 8px; margin-left: 8px; }
+  .ytable a.plink { color: var(--peri); text-decoration: none; border-bottom: 1px dotted rgba(143,165,212,0.45); }
+  .ytable a.plink:hover { color: var(--ink); border-bottom-color: var(--orange); }
   .ytable tr.apyx td { background: rgba(249,115,22,0.07); border-top-color: rgba(249,115,22,0.35); }
   .ytable tr.apyx td:first-child { border-left: 3px solid var(--orange); padding-left: 10px; border-radius: 3px 0 0 3px; }
 
@@ -250,7 +252,7 @@
   <div class="panel" style="grid-column: 1 / -1;">
     <div style="overflow-x:auto">
       <table class="ytable" id="yieldTable">
-        <thead><tr><th>Product</th><th>Platform</th><th class="num">Solana TVL</th><th class="num">APY</th><th class="num">30d Avg</th></tr></thead>
+        <thead><tr><th>Product</th><th>Platform</th><th class="num">Solana TVL</th><th class="num">APY (30d avg)</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -956,10 +958,11 @@ function renderYield(y) {
   const tb = $('yieldTable').querySelector('tbody');
   const row = (r, cls, tvlCell) => `<tr${cls ? ` class="${cls}"` : ''}>
     <td><span class="sym">${r.symbol}</span>${cls ? '<span class="tag">Apyx</span>' : ''}</td>
-    <td>${projName(r.project)}</td>
+    <td>${r.url
+      ? `<a class="plink" href="${r.url}" target="_blank" rel="noopener" title="${r.url}">${projName(r.project)}</a>`
+      : projName(r.project)}</td>
     <td class="num">${tvlCell}</td>
-    <td class="num"><b>${r.apy.toFixed(2)}%</b></td>
-    <td class="num">${r.apy30d.toFixed(2)}%</td></tr>`;
+    <td class="num"><b>${r.apy30d.toFixed(2)}%</b></td></tr>`;
   let html = '';
   if (y.apyusd) {
     const a = y.apyusd;
