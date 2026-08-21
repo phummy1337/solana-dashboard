@@ -431,7 +431,8 @@ def main() -> int:
     # DFDV's Fee Stability Ratio: 1 / (median fee x median-fee volatility),
     # volatility taken as the 30-day rolling stdev of the daily median fee.
     # Tron is excluded — its median fee is 0 (bandwidth model), so FSR blows up.
-    FEE_CHAINS = [c for c in CHAINS_ALL if c != "tron"]
+    # Avalanche is excluded per Pete: not a comparison he wants on this card.
+    FEE_CHAINS = [c for c in CHAINS_ALL if c not in ("tron", "avalanche")]
     try:
         d = bw("v1/metrics/transaction-fee-med-usd", project=",".join(FEE_CHAINS))
         fee_out: dict = {}
