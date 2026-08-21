@@ -280,7 +280,7 @@
 
 <!-- ------------------------------------------------------- activity trend -->
 <div class="shead" style="flex-wrap:wrap; row-gap:8px">
-  <h2>Activity Trends</h2>
+  <h2>Cross-Chain Trends</h2>
   <span class="trend-ctl" id="trendCtl">
     <button class="tgl" data-trange="1d">1D</button>
     <button class="tgl" data-trange="1w">1W</button>
@@ -465,7 +465,8 @@ async function rpc(method, params = [], attempt = 0) {
 const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply: null, inflation: null,
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
                 rainbow: true, preRainbowScale: 'linear',
-                trendRanges: {}, trendScales: {}, trendSmooth: {}, trendSeries: {}, trendCompare: {} };
+                trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
+                trendSeries: {}, trendCompare: {} };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -584,6 +585,13 @@ const TRENDS = [
   { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply',       color: '#E9469A', fmt: usd },
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',                color: '#4ADE80', fmt: usd },
   { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd },
+  { key: 'fsr_card', title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact,
+    tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are. <b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD. <b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.',
+    variants: [
+      { id: 'fsr', label: 'FSR',        compare: 'fsr',        fmt: compact },
+      { id: 'fee', label: 'Median Fee', compare: 'fee_median', fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)) },
+      { id: 'vol', label: 'Fee Volatility', compare: 'fee_vol', fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)) },
+    ] },
 ];
 const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y'];
 
@@ -629,6 +637,14 @@ function buildTrends() {
 
 /* One card, at its own range; re-made in place when its range buttons change. */
 function makeTrendCard(t) {
+  const orig = t;
+  // Variant cards (FSR) swap the underlying compare series and formatter.
+  let variant = null;
+  if (t.variants) {
+    const vid = state.trendVariants[t.key] || t.variants[0].id;
+    variant = t.variants.find(v => v.id === vid) || t.variants[0];
+    t = { ...t, compare: variant.compare, fmt: variant.fmt };
+  }
   const { trendSeries: series, trendCompare: comparisons } = state;
   const range = state.trendRanges[t.key] || '3m';
   const cmp = t.compare && comparisons[t.compare];
@@ -652,7 +668,8 @@ function makeTrendCard(t) {
   el.className = 'panel';
   const noteTail = (range === '1d' ? ' · latest complete day' : '')
                  + (logScale ? ' · log scale' : '') + (smooth ? ' · 7-day average' : '');
-  el.innerHTML = `<div class="crow"><h3>${t.title}</h3>
+  el.innerHTML = `<div class="crow"><h3 style="display:flex;align-items:center">${t.title}${t.tip
+        ? `<span class="uinfo" tabindex="0" role="button" aria-label="What is this metric?">?<span class="tipbox">${t.tip}</span></span>` : ''}</h3>
       <span class="trend-ctl small">${TREND_RANGE_KEYS.map(k =>
         `<button class="tgl" data-crange="${k}" aria-pressed="${k === range}">${k.toUpperCase()}</button>`).join('')}
         <span class="ctl-sep"></span>
@@ -660,6 +677,8 @@ function makeTrendCard(t) {
         <button class="tgl" data-cscale="log" aria-pressed="${logScale}">LOG</button>
         <span class="ctl-sep"></span>
         <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button></span></div>
+    ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
+        `<button class="tgl" data-cvariant="${v.id}" aria-pressed="${v.id === variant.id}">${v.label}</button>`).join('')}</div>` : ''}
     <div class="big num">${t.fmt(last.v)}</div>
     <div class="note">Solana, latest · ${fmtDate(last.d)}${noteTail}</div>
     <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
@@ -676,9 +695,14 @@ function makeTrendCard(t) {
   }));
   el.querySelector('[data-csmooth]').addEventListener('click', () => {
     state.trendSmooth[t.key] = !state.trendSmooth[t.key];
-    const fresh = makeTrendCard(t);
+    const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   });
+  el.querySelectorAll('[data-cvariant]').forEach(b => b.addEventListener('click', () => {
+    state.trendVariants[orig.key] = b.dataset.cvariant;
+    const fresh = makeTrendCard(orig);
+    if (fresh) el.replaceWith(fresh);
+  }));
   const canvas = el.querySelector('canvas');
 
   if (range === '1d') {
