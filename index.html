@@ -143,11 +143,14 @@
            color: var(--mute); font-size: 11.5px; font-weight: 700; cursor: help; flex: none; margin-left: 8px; }
   .uinfo:hover, .uinfo:focus { color: var(--ink); border-color: var(--orange); outline: none; }
   .uinfo .tipbox { position: absolute; bottom: 140%; left: 50%; transform: translateX(-50%);
-                   width: min(310px, 78vw); background: rgba(8,17,38,0.97);
-                   border: 1px solid rgba(143,165,212,0.3); border-radius: 10px; padding: 11px 13px;
-                   font-size: 12.5px; font-weight: 600; color: var(--peri); line-height: 1.5;
+                   width: min(330px, 78vw); background: rgba(8,17,38,0.97);
+                   border: 1px solid rgba(143,165,212,0.3); border-radius: 10px; padding: 12px 14px;
+                   font-size: 13px; font-weight: 500; color: #C6D1E8; line-height: 1.55;
+                   /* nested in the panel h3 — undo its all-caps label styling */
+                   text-transform: none; letter-spacing: 0; text-align: left; white-space: normal;
                    opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 30;
                    box-shadow: 0 12px 32px rgba(0,0,0,0.5); }
+  .tipbox b { font-weight: 700; }
   .uinfo:hover .tipbox, .uinfo:focus .tipbox { opacity: 1; }
   .tipbox b { color: var(--ink); }
   /* first-column cards would clip a centered tooltip at the viewport edge */
@@ -1014,14 +1017,14 @@ function renderYield(y) {
 // update this list when that page changes. Tooltips are the plain-English
 // "what does this mean and why should I care" layer.
 const UPGRADES = [
-  { name: 'Alpenglow', status: 'dev', desc: 'Next-generation consensus protocol targeting ~150 ms finality.',
-    tip: '<b>In simple terms:</b> a rebuild of how validators agree on new blocks. Today a transaction is fully final in ~12 seconds; Alpenglow targets ~150 milliseconds. <b>Why it matters:</b> payments and trades would confirm about as fast as a card swipe, closing the gap with centralized exchanges.' },
+  { name: 'Alpenglow', status: 'dev', desc: 'Next-generation consensus protocol targeting 150 ms finality.',
+    tip: '<b>In simple terms:</b> a rebuild of how validators agree on new blocks. Today a transaction is fully final in about 12 seconds; Alpenglow targets 150 milliseconds. <b>Why it matters:</b> payments and trades would confirm about as fast as a card swipe, closing the gap with centralized exchanges.' },
   { name: 'Reduced Slot Times', status: 'pending', desc: 'Cuts block time from 400 ms to 200 ms.',
     tip: '<b>In simple terms:</b> the network produces blocks twice as often. <b>Why it matters:</b> confirmations land roughly twice as fast and the chain can process more per second — apps feel snappier without any code changes.' },
-  { name: 'Reduced Rent', status: 'pending', desc: 'Cuts on-chain storage deposits by ~90%, phased in over time.',
+  { name: 'Reduced Rent', status: 'pending', desc: 'Cuts on-chain storage deposits by 90%, phased in over time.',
     tip: '<b>In simple terms:</b> storing data on Solana requires a refundable deposit ("rent"); this cuts it by about 90%. <b>Why it matters:</b> creating accounts, tokens and app data gets much cheaper, lowering the cost of onboarding users at scale.' },
   { name: 'Larger Transaction Sizes', status: 'pending', desc: 'Raises the max transaction size from 1,232 to 4,096 bytes.',
-    tip: '<b>In simple terms:</b> each transaction can carry ~3× more instructions and data. <b>Why it matters:</b> complex actions — multi-hop swaps, batched DeFi operations — fit in a single transaction instead of being split apart or failing.' },
+    tip: '<b>In simple terms:</b> each transaction can carry roughly three times more instructions and data. <b>Why it matters:</b> complex actions — multi-hop swaps, batched DeFi operations — fit in a single transaction instead of being split apart or failing.' },
   { name: '100M CU Blocks', status: 'live', desc: 'Raises block capacity from 60M to 100M compute units (+66%).',
     tip: '<b>In simple terms:</b> each block can hold two-thirds more computation. <b>Why it matters:</b> more transactions land per block during busy periods, which means less congestion and steadier fees.' },
   { name: 'Optimized Token Program', status: 'live', desc: 'Token operations use up to 98% less compute.',
