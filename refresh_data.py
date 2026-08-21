@@ -47,6 +47,7 @@ CHARTS = {
     "perps":      (8907,  "Solana: Perp DEXs — Futures Notional Volume"),
     "tokeq_vol":  (10634, "Solana: Tokenized Equities Volume by Token Issuer"),
     "tokeq_sup":  (10631, "Solana: Tokenized Equities Supply"),
+    "tokeq_chain": (6874, "Spot DEXs: Tokenized Equities Volume by Blockchain"),
 }
 
 # Comparison set for the Activity Trends charts: Solana vs the major L1/L2s.
@@ -420,6 +421,32 @@ def main() -> int:
     compare_metric("dex-spot-volume-total-usd", "dex_volume")
     compare_metric("stablecoin-supply-total-usd", "stablecoin_supply")
 
+    # Tokenized-asset volume by blockchain (chart 6874). Equities-only isn't
+    # broken out for most of the history, so approximate it as total tokenized
+    # asset volume minus the commodities category where that's reported.
+    try:
+        rows = chart_rows(CHARTS["tokeq_chain"][0])
+        chain_map = {"solana": "solana", "ethereum": "ethereum", "base": "base",
+                     "arbitrum": "arbitrum", "bnb": "bnb", "bsc": "bnb"}
+        by: dict = {}
+        for r in rows:
+            d0 = row_date(r)
+            ch = chain_map.get((r.get("blockchain") or "").lower())
+            v = r.get("tokenizedasset_volume_usd")
+            if not d0 or not ch or v is None:
+                continue
+            v = max(0, v - (r.get("category_commodities_volume_usd") or 0))
+            by.setdefault(ch, {})
+            by[ch][d0] = by[ch].get(d0, 0) + v
+        out = {c: [{"d": d0, "v": v} for d0, v in sorted(pts.items()) if d0 >= since]
+               for c, pts in by.items()}
+        out = {c: p for c, p in out.items() if p}
+        if out:
+            compare["tokenized_equity_volume"] = out
+            print("  compare tokenized-equity: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+    except Exception as e:  # noqa: BLE001
+        warn(f"compare tokenized equity chart: {e}")
+
     try:
         out = {}
         for chain, slug in LLAMA_SLUGS.items():
@@ -435,6 +462,53 @@ def main() -> int:
             print("  compare defi-tvl: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
     except Exception as e:  # noqa: BLE001
         warn(f"compare defillama tvl: {e}")
+
+    # -------------------------------------------------- yield-bearing stables
+    # Top single-asset stablecoin yield products on Solana from DefiLlama's
+    # yields API (chain=Solana, stablecoin, TVL > $10M, positive APY; LP pairs
+    # excluded, one row per project+symbol keeping the deepest market).
+    # apyUSD is pinned: its yield comes from the Apyx protocol pool on
+    # DefiLlama and its Solana TVL from the apyUSD supply Worker ($1 peg).
+    APYX_POOL_ID = "cb6139f9-4a68-4efd-8245-0312a92aee55"
+    try:
+        pools = get("https://yields.llama.fi/pools")["data"]
+        best: dict = {}
+        for p in pools:
+            sym = (p.get("symbol") or "").upper()
+            if (p.get("chain") != "Solana" or not p.get("stablecoin") or "-" in sym
+                    or (p.get("tvlUsd") or 0) < 10e6 or (p.get("apy") or 0) <= 0):
+                continue
+            k = (p["project"], sym)
+            if k not in best or p["tvlUsd"] > best[k]["tvlUsd"]:
+                best[k] = p
+        items = [{
+            "symbol": s, "project": proj, "tvl": round(p["tvlUsd"]),
+            "apy": round(p.get("apy") or 0, 2), "apy30d": round(p.get("apyMean30d") or 0, 2),
+        } for (proj, s), p in best.items()]
+        items.sort(key=lambda x: -x["apy"])
+
+        apyx_pool = next((p for p in pools if p.get("pool") == APYX_POOL_ID), None)
+        apyusd = None
+        if apyx_pool:
+            apyusd = {
+                "symbol": "apyUSD", "project": "apyx-protocol",
+                "apy": round(apyx_pool.get("apy") or 0, 2),
+                "apy30d": round(apyx_pool.get("apyMean30d") or 0, 2),
+                "tvl_protocol": round(apyx_pool.get("tvlUsd") or 0),
+            }
+            try:
+                supply = get("https://apyusd-supply.apxusd-supply-1337.workers.dev/")
+                apyusd["tvl_solana"] = round(supply["circulatingSupply"])
+            except Exception as e:  # noqa: BLE001
+                warn(f"apyusd supply worker: {e}")
+        else:
+            warn("apyx pool not found on DefiLlama — apyUSD row will be missing")
+
+        data["yield_products"] = {"apyusd": apyusd, "items": items}
+        print(f"  yield products: {len(items)} + apyUSD "
+              f"({apyusd['apy'] if apyusd else '—'}% APY)")
+    except Exception as e:  # noqa: BLE001
+        warn(f"yield products: {e}")
 
     data["compare"] = compare
     data["daily"] = daily
