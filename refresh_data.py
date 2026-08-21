@@ -542,6 +542,22 @@ def main() -> int:
                 "url": proto_urls.get("apyx-protocol") or "https://app.apyx.fi",
                 "logo": "https://apyx-token-logos.apxusd-supply-1337.workers.dev/apyusd-256.png",
             }
+            # Preferred TVL: "Protocol Reserves" from Apyx's Accountable
+            # proof-of-solvency feed (total reserves minus protocol-owned
+            # liquidity and inventory — matches the figure the page displays).
+            # The edge 403s non-browser user agents, hence the UA override.
+            try:
+                acc = get("https://api.accountable.apyx.fi/dashboard",
+                          {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                         "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                         "Chrome/126.0.0.0 Safari/537.36",
+                           "Referer": "https://accountable.apyx.fi/"})
+                rsv = acc["data"]["reserves"]
+                apyusd["tvl_reserves"] = round(
+                    rsv["total_reserves"]["value"] - rsv["pol"] - rsv["inventory"])
+                print(f"  apyx protocol reserves: ${apyusd['tvl_reserves']:,.0f}")
+            except Exception as e:  # noqa: BLE001
+                warn(f"accountable reserves: {e} — falling back to DefiLlama TVL")
             try:
                 supply = get("https://apyusd-supply.apxusd-supply-1337.workers.dev/")
                 apyusd["tvl_solana"] = round(supply["circulatingSupply"])
