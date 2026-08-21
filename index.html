@@ -116,6 +116,8 @@
   /* Activity Trends: fixed two-across so the comparison charts get room. */
   #trendGrid { grid-template-columns: repeat(2, 1fr); }
   @media (max-width: 900px) { #trendGrid { grid-template-columns: 1fr; } }
+  .trend-ctl { display: flex; flex-wrap: wrap; gap: 6px; }
+  .trend-ctl .tgl { padding: 5px 11px; font-size: 12px; }
 
   .bar { height: 9px; border-radius: 99px; background: rgba(143,165,212,0.14); overflow: hidden; margin-top: 13px; }
   .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--orange), #F5A524); }
@@ -168,6 +170,7 @@
     <div class="v num" id="t_price">—</div>
     <div class="s num" id="t_price_sub">&nbsp;</div>
   </div>
+  <div class="tile"><div class="k">24-Hour Return</div><div class="v num" id="t_r24">—</div><div class="s">vs. 24 hours ago</div></div>
   <div class="tile"><div class="k">3-Month Return</div><div class="v num" id="t_r3m">—</div><div class="s">vs. 91 days ago</div></div>
   <div class="tile"><div class="k">Year-to-Date Return</div><div class="v num" id="t_rytd">—</div><div class="s" id="t_rytd_sub">—</div></div>
   <div class="tile"><div class="k">1-Year Return</div><div class="v num" id="t_r1y">—</div><div class="s">vs. 365 days ago</div></div>
@@ -191,15 +194,15 @@
     <div class="controls">
       <span class="ctl-label">Range</span>
       <button class="tgl" data-range="90"   aria-pressed="false">3M</button>
-      <button class="tgl" data-range="ytd"  aria-pressed="true">YTD</button>
+      <button class="tgl" data-range="ytd"  aria-pressed="false">YTD</button>
       <button class="tgl" data-range="365"  aria-pressed="false">1Y</button>
       <button class="tgl" data-range="1826" aria-pressed="false">5Y</button>
-      <button class="tgl" data-range="all"  aria-pressed="false">All</button>
-      <button class="tgl" id="rainbowBtn" aria-pressed="false" style="margin-left:10px">🌈 SOL Rainbow</button>
+      <button class="tgl" data-range="all"  aria-pressed="true">All</button>
+      <button class="tgl" id="rainbowBtn" aria-pressed="true" style="margin-left:10px">🌈 SOL Rainbow</button>
       <span class="spacer"></span>
       <span class="ctl-label">Scale</span>
-      <button class="tgl" data-scale="linear" aria-pressed="true">Linear</button>
-      <button class="tgl" data-scale="logarithmic" aria-pressed="false">Log</button>
+      <button class="tgl" data-scale="linear" aria-pressed="false">Linear</button>
+      <button class="tgl" data-scale="logarithmic" aria-pressed="true">Log</button>
     </div>
     <section class="stage">
       <div class="wrap"><canvas id="priceChart" role="img" aria-label="SOL price history"></canvas></div>
@@ -209,7 +212,21 @@
 </div>
 
 <!-- ------------------------------------------------------- activity trend -->
-<div class="shead"><h2>Activity Trends</h2><span class="rule"></span><span class="asof">daily · Blockworks</span></div>
+<div class="shead" style="flex-wrap:wrap; row-gap:8px">
+  <h2>Activity Trends</h2>
+  <span class="trend-ctl" id="trendCtl">
+    <button class="tgl" data-trange="1d">1D</button>
+    <button class="tgl" data-trange="1w">1W</button>
+    <button class="tgl" data-trange="1m">1M</button>
+    <button class="tgl" data-trange="3m" aria-pressed="true">3M</button>
+    <button class="tgl" data-trange="6m">6M</button>
+    <button class="tgl" data-trange="1y">1Y</button>
+    <button class="tgl" data-trange="ytd">YTD</button>
+    <button class="tgl" data-trange="2y">2Y</button>
+    <button class="tgl" data-trange="5y">5Y</button>
+  </span>
+  <span class="rule"></span><span class="asof">daily · Blockworks</span>
+</div>
 <section class="grid" id="trendGrid"></section>
 
 <!-- ---------------------------------------------------------- live health -->
@@ -349,9 +366,10 @@ async function rpc(method, params = []) {
 }
 
 /* -------------------------------------------------------------------- state */
-const state = { range: 'ytd', scale: 'linear', priceSeries: [], totalSupply: null, inflation: null,
+const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply: null, inflation: null,
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
-                rainbow: false, preRainbowScale: 'linear' };
+                rainbow: true, preRainbowScale: 'linear',
+                trendRange: '3m', trendSeries: {}, trendCompare: {} };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -486,39 +504,83 @@ function sparkOptions(t, unit, logScale) {
   };
 }
 
-function buildTrends(series, comparisons) {
+let trendCharts = [];
+function trendCutoff(range) {
+  if (range === 'ytd') return `${new Date().getUTCFullYear()}-01-01`;
+  const days = { '1w': 7, '1m': 30, '3m': 91, '6m': 182, '1y': 365, '2y': 730, '5y': 1826 }[range];
+  return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+}
+
+function buildTrends() {
+  const { trendSeries: series, trendCompare: comparisons, trendRange: range } = state;
   const grid = $('trendGrid');
+  trendCharts.forEach(c => c.destroy());
+  trendCharts = [];
   grid.innerHTML = '';
+  const cutoff = range === '1d' ? null : trendCutoff(range);
+
   for (const t of TRENDS) {
     const cmp = t.compare && comparisons[t.compare];
     const solPts = cmp ? cmp.solana : series[t.key];
     if (!solPts || !solPts.length) continue;
     const last = solPts[solPts.length - 1];
-    const spanDays = (new Date(last.d) - new Date(solPts[0].d)) / 86400000;
-    const unit = spanDays > 400 ? 'year' : 'month';
 
     const el = document.createElement('div');
     el.className = 'panel';
+    const noteTail = range === '1d' ? ' · latest complete day' : (cmp ? ' · log scale' : '');
     el.innerHTML = `<h3>${t.title}</h3>
       <div class="big num">${t.fmt(last.v)}</div>
-      <div class="note">Solana, latest · ${fmtDate(last.d)}${cmp ? ' · log scale' : ''}</div>
+      <div class="note">Solana, latest · ${fmtDate(last.d)}${noteTail}</div>
       <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
-      ${cmp ? '<div class="legend"></div>' : ''}`;
+      ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}`;
     grid.appendChild(el);
+    const canvas = el.querySelector('canvas');
+
+    if (range === '1d') {
+      // Single-day view: a bar per chain (or one bar for Solana-only metrics).
+      const bars = cmp
+        ? CHAINS.filter(c => cmp[c.key]?.length)
+            .map(c => ({ name: c.name, color: c.color, v: cmp[c.key][cmp[c.key].length - 1].v }))
+        : [{ name: 'Solana', color: t.color, v: last.v }];
+      trendCharts.push(new Chart(canvas, {
+        type: 'bar',
+        data: { labels: bars.map(b => b.name),
+                datasets: [{ data: bars.map(b => b.v),
+                             backgroundColor: bars.map(b => b.color + 'CC'),
+                             borderColor: bars.map(b => b.color), borderWidth: 1,
+                             borderRadius: 5, maxBarThickness: 70 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          scales: {
+            x: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 11 } } },
+            y: { type: cmp ? 'logarithmic' : 'linear', beginAtZero: !cmp,
+                 grid: gridCfg, border: { display: false },
+                 ticks: { maxTicksLimit: 4, font: { size: 10 }, callback: v => t.fmt(v) } },
+          },
+          plugins: { legend: { display: false },
+                     tooltip: { ...tooltipCfg, callbacks: { label: c => t.fmt(c.parsed.y) } } },
+        },
+      }));
+      continue;
+    }
+
+    const clip = pts => pts.filter(p => p.d >= cutoff);
+    const spanDays = Math.max(1, (new Date(last.d) - new Date(cutoff)) / 86400000);
+    const unit = spanDays > 720 ? 'year' : spanDays > 120 ? 'month' : 'day';
 
     let datasets;
     if (cmp) {
       datasets = CHAINS.filter(c => cmp[c.key]).map(c => ({
         label: c.name,
-        data: cmp[c.key].filter(p => p.v > 0).map(p => ({ x: p.d, y: p.v })),
+        data: clip(cmp[c.key]).filter(p => p.v > 0).map(p => ({ x: p.d, y: p.v })),
         borderColor: c.color, borderWidth: c.width, order: c.key === 'solana' ? 10 : 1,
         pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: false,
-      }));
+      })).filter(d => d.data.length);
       el.querySelector('.legend').innerHTML = CHAINS.filter(c => cmp[c.key]).map(c =>
         `<span class="leg"><span class="sw" style="background:${c.color}"></span>${c.name}</span>`).join('');
     } else {
       datasets = [{
-        label: t.title, data: solPts.map(p => ({ x: p.d, y: p.v })),
+        label: t.title, data: clip(solPts).map(p => ({ x: p.d, y: p.v })),
         borderColor: t.color, borderWidth: 1.6, pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: true,
         backgroundColor: ctx => {
           const { chart } = ctx; if (!chart.chartArea) return 'transparent';
@@ -529,9 +591,9 @@ function buildTrends(series, comparisons) {
       }];
     }
 
-    new Chart(el.querySelector('canvas'), {
+    trendCharts.push(new Chart(canvas, {
       type: 'line', data: { datasets }, options: sparkOptions(t, unit, !!cmp),
-    });
+    }));
   }
 }
 
@@ -551,6 +613,7 @@ async function loadData() {
     // price + returns
     $('t_price').textContent = price(s.price);
     $('t_price_sub').textContent = 'live quote';
+    setPct($('t_r24'),  s.return_24h);
     setPct($('t_r3m'),  s.return_3m);
     setPct($('t_rytd'), s.return_ytd);
     setPct($('t_r1y'),  s.return_1y);
@@ -562,7 +625,9 @@ async function loadData() {
     // charts
     state.priceSeries = (d.series?.price || []).map(p => ({ x: p.d, y: p.v }));
     drawPrice();
-    buildTrends(d.series || {}, d.compare || {});
+    state.trendSeries = d.series || {};
+    state.trendCompare = d.compare || {};
+    buildTrends();
 
     if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
     health.data = 'ok';
@@ -805,6 +870,11 @@ document.querySelectorAll('[data-scale]').forEach(b => b.addEventListener('click
   document.querySelectorAll('[data-scale]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
   state.scale = b.dataset.scale;
   drawPrice();
+}));
+document.querySelectorAll('[data-trange]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-trange]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
+  state.trendRange = b.dataset.trange;
+  buildTrends();
 }));
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
