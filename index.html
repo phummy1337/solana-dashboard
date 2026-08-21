@@ -667,7 +667,6 @@ async function buildTrendImage(key, title, fmt, el) {
       label: d.label, color: d.borderColor, val: d.data[d.data.length - 1]?.y }));
   }
 
-  const big = el.querySelector('.big').textContent.trim();
   const note = el.querySelector('.note').textContent.trim();
 
   // pre-measure legend wrapping
@@ -683,8 +682,9 @@ async function buildTrendImage(key, title, fmt, el) {
     return pos;
   });
 
-  const legendTop = 158 + chartH + 26;
-  const H = legendTop + rows * 28 + 84;
+  const chartTop = 132;
+  const legendTop = chartTop + chartH + 26;
+  const H = legendTop + rows * 28 + 82;
   const cv = document.createElement('canvas');
   cv.width = W * S; cv.height = H * S;
   const g = cv.getContext('2d');
@@ -694,14 +694,17 @@ async function buildTrendImage(key, title, fmt, el) {
   bg.addColorStop(0, '#0A1633'); bg.addColorStop(1, '#030815');
   g.fillStyle = bg; g.fillRect(0, 0, W, H);
 
-  g.fillStyle = '#F1F5FB'; g.font = '700 26px Syne, sans-serif';
-  g.fillText(title, PAD, 58);
-  g.font = '700 30px ui-sans-serif, system-ui, sans-serif';
-  g.fillText(big, PAD, 98);
-  g.fillStyle = '#8FA5D4'; g.font = '600 14px Syne, sans-serif';
-  g.fillText(note, PAD, 126);
+  g.fillStyle = '#F1F5FB'; g.font = '700 36px Syne, sans-serif';
+  g.fillText(title, PAD, 66);
+  g.fillStyle = '#8FA5D4'; g.font = '600 15px Syne, sans-serif';
+  g.fillText(note, PAD, 96);
+  if (logo) {
+    // DFDV mark top-right, optically aligned with the title line
+    const lh = 24, lw = lh * logo.width / logo.height;
+    g.drawImage(logo, W - PAD - lw, 42, lw, lh);
+  }
 
-  g.drawImage(src, PAD, 158, chartW, chartH);
+  g.drawImage(src, PAD, chartTop, chartW, chartH);
 
   g.font = '600 13px Syne, sans-serif';
   for (const p of laid) {
@@ -710,13 +713,11 @@ async function buildTrendImage(key, title, fmt, el) {
     g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + 20, y);
   }
 
-  const fy = H - 60;
+  const fy = H - 58;
   g.strokeStyle = 'rgba(143,165,212,0.15)';
   g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
-  if (logo) {
-    const lh = 20, lw = lh * logo.width / logo.height;
-    g.drawImage(logo, PAD, fy + 18, lw, lh);
-  }
+  g.fillStyle = '#6B7FAB'; g.font = '600 13px Syne, sans-serif';
+  g.fillText('State of Solana', PAD, fy + 32);
   g.fillStyle = '#F97316'; g.font = '700 15px Syne, sans-serif';
   const cta = 'Visit stateofsol.com →';
   g.fillText(cta, W - PAD - g.measureText(cta).width, fy + 33);
@@ -781,8 +782,7 @@ function makeTrendCard(t) {
         <button class="tgl" data-cdl title="Download this chart as PNG">⤓ PNG</button></span></div>
     ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
         `<button class="tgl" data-cvariant="${v.id}" aria-pressed="${v.id === variant.id}">${v.label}</button>`).join('')}</div>` : ''}
-    <div class="big num">${t.fmt(last.v)}</div>
-    <div class="note">Solana, latest · ${fmtDate(last.d)}${noteTail}</div>
+    <div class="note">Latest · ${fmtDate(last.d)}${noteTail}</div>
     <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
     ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}`;
   el.querySelectorAll('[data-crange]').forEach(b => b.addEventListener('click', () => {
