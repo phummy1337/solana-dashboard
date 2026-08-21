@@ -427,6 +427,46 @@ def main() -> int:
     compare_metric("dex-spot-volume-total-usd", "dex_volume", CHAINS_DEX)
     compare_metric("stablecoin-supply-total-usd", "stablecoin_supply", CHAINS_ALL)
 
+    # ------------------------------------------------- fee stability (FSR)
+    # DFDV's Fee Stability Ratio: 1 / (median fee x median-fee volatility),
+    # volatility taken as the 30-day rolling stdev of the daily median fee.
+    # Tron is excluded — its median fee is 0 (bandwidth model), so FSR blows up.
+    FEE_CHAINS = [c for c in CHAINS_ALL if c != "tron"]
+    try:
+        d = bw("v1/metrics/transaction-fee-med-usd", project=",".join(FEE_CHAINS))
+        fee_out: dict = {}
+        vol_out: dict = {}
+        fsr_out: dict = {}
+        for chain in FEE_CHAINS:
+            rows = sorted((r for r in (d.get(chain) or []) if r.get("value") is not None),
+                          key=lambda r: r["date"])
+            vals = [r["value"] for r in rows]
+            fees, vols, fsrs = [], [], []
+            for i, r in enumerate(rows):
+                if r["date"] < since:
+                    continue
+                w = vals[max(0, i - 29):i + 1]
+                m = sum(w) / len(w)
+                sd = (sum((x - m) ** 2 for x in w) / len(w)) ** 0.5
+                fees.append({"d": r["date"], "v": vals[i]})
+                if sd > 0:
+                    vols.append({"d": r["date"], "v": sd})
+                    if vals[i] > 0:
+                        fsrs.append({"d": r["date"], "v": 1 / (vals[i] * sd)})
+            if fees:
+                fee_out[chain] = fees
+            if vols:
+                vol_out[chain] = vols
+            if fsrs:
+                fsr_out[chain] = fsrs
+        if fsr_out:
+            compare["fee_median"] = fee_out
+            compare["fee_vol"] = vol_out
+            compare["fsr"] = fsr_out
+            print("  compare fee/FSR: " + ", ".join(f"{c}:{len(v)}" for c, v in fsr_out.items()))
+    except Exception as e:  # noqa: BLE001
+        warn(f"fee stability: {e}")
+
     # Tokenized-asset volume by blockchain (chart 6874). Equities-only isn't
     # broken out for most of the history, so approximate it as total tokenized
     # asset volume minus the commodities category where that's reported.
