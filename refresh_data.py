@@ -50,11 +50,17 @@ CHARTS = {
     "tokeq_chain": (6874, "Spot DEXs: Tokenized Equities Volume by Blockchain"),
 }
 
-# Comparison set for the Activity Trends charts: Solana vs the major L1/L2s.
-# Blockworks metric slugs on the left; DefiLlama chain names on the right.
-COMPARE_CHAINS = ["solana", "ethereum", "base", "arbitrum", "bnb"]
+# Comparison sets for the Activity Trends charts: Solana vs major L1/L2s.
+# Per-metric lists because one invalid slug 400s the whole Blockworks request —
+# tron/polygon/aptos have no dex-spot-volume series, for example.
+CHAINS_ALL = ["solana", "ethereum", "base", "arbitrum", "bnb", "avalanche",
+              "sui", "tron", "hyperevm", "polygon"]
+CHAINS_DEX = ["solana", "ethereum", "base", "arbitrum", "bnb", "avalanche",
+              "sui", "hyperevm"]
 LLAMA_SLUGS = {"solana": "Solana", "ethereum": "Ethereum", "base": "Base",
-               "arbitrum": "Arbitrum", "bnb": "BSC"}
+               "arbitrum": "Arbitrum", "bnb": "BSC", "avalanche": "Avalanche",
+               "sui": "Sui", "tron": "Tron", "hyperevm": "Hyperliquid",
+               "polygon": "Polygon"}
 
 warnings: list[str] = []
 
@@ -401,11 +407,11 @@ def main() -> int:
     compare: dict = {}
     since = f"{YEAR - 5}-01-01"
 
-    def compare_metric(slug: str, key: str) -> None:
+    def compare_metric(slug: str, key: str, chains: list[str]) -> None:
         try:
-            d = bw(f"v1/metrics/{slug}", project=",".join(COMPARE_CHAINS))
+            d = bw(f"v1/metrics/{slug}", project=",".join(chains))
             out = {}
-            for chain in COMPARE_CHAINS:
+            for chain in chains:
                 rows = d.get(chain) or []
                 pts = [{"d": r["date"], "v": r["value"]} for r in sorted(rows, key=lambda r: r["date"])
                        if r.get("value") is not None and r["date"] >= since]
@@ -417,9 +423,9 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             warn(f"compare {slug}: {e}")
 
-    compare_metric("transaction-total", "transactions")
-    compare_metric("dex-spot-volume-total-usd", "dex_volume")
-    compare_metric("stablecoin-supply-total-usd", "stablecoin_supply")
+    compare_metric("transaction-total", "transactions", CHAINS_ALL)
+    compare_metric("dex-spot-volume-total-usd", "dex_volume", CHAINS_DEX)
+    compare_metric("stablecoin-supply-total-usd", "stablecoin_supply", CHAINS_ALL)
 
     # Tokenized-asset volume by blockchain (chart 6874). Equities-only isn't
     # broken out for most of the history, so approximate it as total tokenized
@@ -427,7 +433,9 @@ def main() -> int:
     try:
         rows = chart_rows(CHARTS["tokeq_chain"][0])
         chain_map = {"solana": "solana", "ethereum": "ethereum", "base": "base",
-                     "arbitrum": "arbitrum", "bnb": "bnb", "bsc": "bnb"}
+                     "arbitrum": "arbitrum", "bnb": "bnb", "bsc": "bnb",
+                     "avalanche": "avalanche", "sui": "sui", "tron": "tron",
+                     "hyperevm": "hyperevm", "polygon": "polygon"}
         by: dict = {}
         for r in rows:
             d0 = row_date(r)
