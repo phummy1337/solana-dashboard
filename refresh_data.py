@@ -498,10 +498,36 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             warn(f"protocol urls: {e}")
 
+        # Product-wide TVL: the same project+symbol summed across every chain.
+        totals: dict = {}
+        for p in pools:
+            k = (p.get("project"), (p.get("symbol") or "").upper())
+            totals[k] = totals.get(k, 0) + (p.get("tvlUsd") or 0)
+
+        # Token logos via CoinGecko search, exact-symbol match only.
+        logo_cache: dict = {}
+
+        def logo_for(sym: str):
+            if sym in logo_cache:
+                return logo_cache[sym]
+            url = None
+            try:
+                res = get(f"https://api.coingecko.com/api/v3/search?query={sym}")
+                for c in res.get("coins", []):
+                    if (c.get("symbol") or "").upper() == sym.upper():
+                        url = c.get("large") or c.get("thumb")
+                        break
+            except Exception as e:  # noqa: BLE001
+                warn(f"logo search {sym}: {e}")
+            logo_cache[sym] = url
+            return url
+
         items = [{
             "symbol": s, "project": proj, "tvl": round(p["tvlUsd"]),
+            "tvl_total": round(totals.get((proj, s), p["tvlUsd"])),
             "apy": round(p.get("apy") or 0, 2), "apy30d": round(p.get("apyMean30d") or 0, 2),
             "url": proto_urls.get(proj) or None,
+            "logo": logo_for(s),
         } for (proj, s), p in best.items()]
         items.sort(key=lambda x: -x["apy30d"])
 
@@ -514,6 +540,7 @@ def main() -> int:
                 "apy30d": round(apyx_pool.get("apyMean30d") or 0, 2),
                 "tvl_protocol": round(apyx_pool.get("tvlUsd") or 0),
                 "url": proto_urls.get("apyx-protocol") or "https://app.apyx.fi",
+                "logo": "https://apyx-token-logos.apxusd-supply-1337.workers.dev/apyusd-256.png",
             }
             try:
                 supply = get("https://apyusd-supply.apxusd-supply-1337.workers.dev/")
