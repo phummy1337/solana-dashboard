@@ -25,6 +25,7 @@ type and chrome, so the two sites read as siblings.
 | --- | --- | --- |
 | Returns, all YTD tiles, activity trends | Blockworks API, pre-aggregated into `data.json` | `refresh_data.py`, twice daily via Actions |
 | DeFi TVL | DefiLlama (`api.llama.fi`), pre-aggregated into `data.json` | same refresh |
+| Yield-bearing stablecoins | DefiLlama yields API + Apyx apyUSD supply Worker | same refresh |
 | Epoch, TPS, validators, stake, version | Public Solana RPC, client-side | every 30s in the browser |
 | Total supply (for staked %) | CoinGecko, client-side | on load |
 

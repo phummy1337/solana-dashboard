@@ -118,6 +118,21 @@
   @media (max-width: 900px) { #trendGrid { grid-template-columns: 1fr; } }
   .trend-ctl { display: flex; flex-wrap: wrap; gap: 6px; }
   .trend-ctl .tgl { padding: 5px 11px; font-size: 12px; }
+  .crow { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .trend-ctl.small { gap: 3px; }
+  .trend-ctl.small .tgl { padding: 2px 7px; font-size: 10px; border-radius: 9px; }
+
+  .ytable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .ytable th { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+               color: var(--mute); text-align: left; padding: 4px 14px 9px 0; }
+  .ytable th.num, .ytable td.num { text-align: right; }
+  .ytable td { padding: 9px 14px 9px 0; border-top: 1px solid var(--line-2); font-weight: 600; color: var(--peri); white-space: nowrap; }
+  .ytable td b { color: var(--ink); font-weight: 700; }
+  .ytable td .sym { color: var(--ink); font-weight: 700; }
+  .ytable td .tag { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+                    color: #12100B; background: var(--orange); border-radius: 8px; padding: 2px 8px; margin-left: 8px; }
+  .ytable tr.apyx td { background: rgba(249,115,22,0.07); border-top-color: rgba(249,115,22,0.35); }
+  .ytable tr.apyx td:first-child { border-left: 3px solid var(--orange); padding-left: 10px; border-radius: 3px 0 0 3px; }
 
   .bar { height: 9px; border-radius: 99px; background: rgba(143,165,212,0.14); overflow: hidden; margin-top: 13px; }
   .bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--orange), #F5A524); }
@@ -228,6 +243,20 @@
   <span class="rule"></span><span class="asof">daily · Blockworks</span>
 </div>
 <section class="grid" id="trendGrid"></section>
+
+<!-- ------------------------------------------------- yield-bearing stables -->
+<div class="shead"><h2>Yield-Bearing Stablecoins</h2><span class="rule"></span><span class="asof">Solana · TVL &gt; $10M · DefiLlama</span></div>
+<section class="grid">
+  <div class="panel" style="grid-column: 1 / -1;">
+    <div style="overflow-x:auto">
+      <table class="ytable" id="yieldTable">
+        <thead><tr><th>Product</th><th>Platform</th><th class="num">Solana TVL</th><th class="num">APY</th><th class="num">30d Avg</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="note" id="yieldNote" style="margin-top:10px"></div>
+  </div>
+</section>
 
 <!-- ---------------------------------------------------------- live health -->
 <div class="shead"><h2>Live Network Health</h2><span class="rule"></span><span class="asof">public Solana RPC</span></div>
@@ -369,7 +398,7 @@ async function rpc(method, params = []) {
 const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply: null, inflation: null,
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
                 rainbow: true, preRainbowScale: 'linear',
-                trendRange: '3m', trendSeries: {}, trendCompare: {} };
+                trendRanges: {}, trendSeries: {}, trendCompare: {} };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -484,8 +513,9 @@ const TRENDS = [
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',                color: '#4ADE80', fmt: usd },
   { key: 'perps',                   title: 'Daily Perps Volume',      color: '#A855F7', fmt: usd },
   { key: 'traders',                 title: 'Daily Active Traders',    color: '#F5A524', fmt: compact },
-  { key: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd },
+  { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd },
 ];
+const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y'];
 
 function sparkOptions(t, unit, logScale) {
   return {
@@ -504,7 +534,7 @@ function sparkOptions(t, unit, logScale) {
   };
 }
 
-let trendCharts = [];
+let trendCharts = {};   // TRENDS key -> Chart instance
 function trendCutoff(range) {
   if (range === 'ytd') return `${new Date().getUTCFullYear()}-01-01`;
   const days = { '1w': 7, '1m': 30, '3m': 91, '6m': 182, '1y': 365, '2y': 730, '5y': 1826 }[range];
@@ -512,37 +542,51 @@ function trendCutoff(range) {
 }
 
 function buildTrends() {
-  const { trendSeries: series, trendCompare: comparisons, trendRange: range } = state;
   const grid = $('trendGrid');
-  trendCharts.forEach(c => c.destroy());
-  trendCharts = [];
+  Object.values(trendCharts).forEach(c => c.destroy());
+  trendCharts = {};
   grid.innerHTML = '';
+  for (const t of TRENDS) {
+    const el = makeTrendCard(t);
+    if (el) grid.appendChild(el);
+  }
+}
+
+/* One card, at its own range; re-made in place when its range buttons change. */
+function makeTrendCard(t) {
+  const { trendSeries: series, trendCompare: comparisons } = state;
+  const range = state.trendRanges[t.key] || '3m';
+  const cmp = t.compare && comparisons[t.compare];
+  const solPts = cmp ? cmp.solana : series[t.key];
+  if (!solPts || !solPts.length) return null;
+  const last = solPts[solPts.length - 1];
   const cutoff = range === '1d' ? null : trendCutoff(range);
 
-  for (const t of TRENDS) {
-    const cmp = t.compare && comparisons[t.compare];
-    const solPts = cmp ? cmp.solana : series[t.key];
-    if (!solPts || !solPts.length) continue;
-    const last = solPts[solPts.length - 1];
+  trendCharts[t.key]?.destroy();
+  const el = document.createElement('div');
+  el.className = 'panel';
+  const noteTail = range === '1d' ? ' · latest complete day' : (cmp ? ' · log scale' : '');
+  el.innerHTML = `<div class="crow"><h3>${t.title}</h3>
+      <span class="trend-ctl small">${TREND_RANGE_KEYS.map(k =>
+        `<button class="tgl" data-crange="${k}" aria-pressed="${k === range}">${k.toUpperCase()}</button>`).join('')}</span></div>
+    <div class="big num">${t.fmt(last.v)}</div>
+    <div class="note">Solana, latest · ${fmtDate(last.d)}${noteTail}</div>
+    <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
+    ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}`;
+  el.querySelectorAll('[data-crange]').forEach(b => b.addEventListener('click', () => {
+    state.trendRanges[t.key] = b.dataset.crange;
+    const fresh = makeTrendCard(t);
+    if (fresh) el.replaceWith(fresh);
+  }));
+  const canvas = el.querySelector('canvas');
 
-    const el = document.createElement('div');
-    el.className = 'panel';
-    const noteTail = range === '1d' ? ' · latest complete day' : (cmp ? ' · log scale' : '');
-    el.innerHTML = `<h3>${t.title}</h3>
-      <div class="big num">${t.fmt(last.v)}</div>
-      <div class="note">Solana, latest · ${fmtDate(last.d)}${noteTail}</div>
-      <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
-      ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}`;
-    grid.appendChild(el);
-    const canvas = el.querySelector('canvas');
-
-    if (range === '1d') {
+  if (range === '1d') {
       // Single-day view: a bar per chain (or one bar for Solana-only metrics).
       const bars = cmp
         ? CHAINS.filter(c => cmp[c.key]?.length)
             .map(c => ({ name: c.name, color: c.color, v: cmp[c.key][cmp[c.key].length - 1].v }))
         : [{ name: 'Solana', color: t.color, v: last.v }];
-      trendCharts.push(new Chart(canvas, {
+      trendCharts[t.key] = new Chart(canvas, {
         type: 'bar',
         data: { labels: bars.map(b => b.name),
                 datasets: [{ data: bars.map(b => b.v),
@@ -560,9 +604,9 @@ function buildTrends() {
           plugins: { legend: { display: false },
                      tooltip: { ...tooltipCfg, callbacks: { label: c => t.fmt(c.parsed.y) } } },
         },
-      }));
-      continue;
-    }
+      });
+      return el;
+  }
 
     const clip = pts => pts.filter(p => p.d >= cutoff);
     const spanDays = Math.max(1, (new Date(last.d) - new Date(cutoff)) / 86400000);
@@ -591,10 +635,10 @@ function buildTrends() {
       }];
     }
 
-    trendCharts.push(new Chart(canvas, {
-      type: 'line', data: { datasets }, options: sparkOptions(t, unit, !!cmp),
-    }));
-  }
+  trendCharts[t.key] = new Chart(canvas, {
+    type: 'line', data: { datasets }, options: sparkOptions(t, unit, !!cmp),
+  });
+  return el;
 }
 
 /* ------------------------------------------------------- pre-aggregated data */
@@ -628,6 +672,7 @@ async function loadData() {
     state.trendSeries = d.series || {};
     state.trendCompare = d.compare || {};
     buildTrends();
+    renderYield(d.yield_products);
 
     if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
     health.data = 'ok';
@@ -871,9 +916,10 @@ document.querySelectorAll('[data-scale]').forEach(b => b.addEventListener('click
   state.scale = b.dataset.scale;
   drawPrice();
 }));
+/* Header control applies one range to every card; per-card buttons override. */
 document.querySelectorAll('[data-trange]').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('[data-trange]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
-  state.trendRange = b.dataset.trange;
+  for (const t of TRENDS) state.trendRanges[t.key] = b.dataset.trange;
   buildTrends();
 }));
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
@@ -895,6 +941,39 @@ $('rainbowBtn').addEventListener('click', () => {
   else setScale(state.preRainbowScale);
   drawPrice();
 });
+
+/* ----------------------------------------------------- yield products table */
+const PROJECT_NAMES = {
+  'apyx-protocol': 'Apyx Protocol', 'blackrock-buidl': 'BlackRock',
+  'jupiter-lend': 'Jupiter Lend', 'kamino-lend': 'Kamino Lend',
+  'ondo-yield-assets': 'Ondo Finance', 'sentora': 'Sentora', 'credix': 'Credix',
+  'save': 'Save', 'unitas-usdu': 'Unitas',
+};
+const projName = p => PROJECT_NAMES[p] || p.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+function renderYield(y) {
+  if (!y || (!y.apyusd && !y.items?.length)) return;
+  const tb = $('yieldTable').querySelector('tbody');
+  const row = (r, cls, tvlCell) => `<tr${cls ? ` class="${cls}"` : ''}>
+    <td><span class="sym">${r.symbol}</span>${cls ? '<span class="tag">Apyx</span>' : ''}</td>
+    <td>${projName(r.project)}</td>
+    <td class="num">${tvlCell}</td>
+    <td class="num"><b>${r.apy.toFixed(2)}%</b></td>
+    <td class="num">${r.apy30d.toFixed(2)}%</td></tr>`;
+  let html = '';
+  if (y.apyusd) {
+    const a = y.apyusd;
+    const tvl = a.tvl_solana != null ? usd(a.tvl_solana) : '—';
+    html += row(a, 'apyx', `<b>${tvl}</b>`);
+  }
+  html += (y.items || []).map(r => row(r, '', `<b>${usd(r.tvl)}</b>`)).join('');
+  tb.innerHTML = html;
+  if (y.apyusd?.tvl_protocol) {
+    $('yieldNote').textContent =
+      `apyUSD TVL is Solana circulating supply; Apyx protocol-wide TVL is ${usd(y.apyusd.tvl_protocol)} across chains. ` +
+      `Other rows are each product's deepest Solana market on DefiLlama.`;
+  }
+}
 
 /* ------------------------------------------------------------ uptime panel */
 // Documented full mainnet-beta outages (Helius, "A Complete History of Solana
