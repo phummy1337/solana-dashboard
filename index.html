@@ -429,22 +429,32 @@ function paintHealth() {
 
 /* ------------------------------------------------------------------ fetches */
 let rpcId = 0;
-async function rpc(method, params = []) {
-  const r = await fetch(CONFIG.RPC, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
-  });
-  if (!r.ok) throw new Error(`RPC ${method} HTTP ${r.status}`);
-  const j = await r.json();
-  if (j.error) throw new Error(`RPC ${method}: ${j.error.message}`);
-  return j.result;
+async function rpc(method, params = [], attempt = 0) {
+  try {
+    const r = await fetch(CONFIG.RPC, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
+    });
+    if (!r.ok) throw new Error(`RPC ${method} HTTP ${r.status}`);
+    const j = await r.json();
+    if (j.error) throw new Error(`RPC ${method}: ${j.error.message}`);
+    return j.result;
+  } catch (e) {
+    // publicnode's rate limiter drops CORS headers when throttling, which
+    // surfaces as a fetch failure — one spaced retry rides out the blip.
+    if (attempt < 1) {
+      await new Promise(res => setTimeout(res, 1500));
+      return rpc(method, params, attempt + 1);
+    }
+    throw e;
+  }
 }
 
 /* -------------------------------------------------------------------- state */
 const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply: null, inflation: null,
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
                 rainbow: true, preRainbowScale: 'linear',
-                trendRanges: {}, trendScales: {}, trendSeries: {}, trendCompare: {} };
+                trendRanges: {}, trendScales: {}, trendSmooth: {}, trendSeries: {}, trendCompare: {} };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -562,7 +572,6 @@ const TRENDS = [
   { key: 'ytd_dex_volume',          compare: 'dex_volume',        title: 'Daily Spot DEX Volume',   color: '#14F195', fmt: usd },
   { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply',       color: '#E9469A', fmt: usd },
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',                color: '#4ADE80', fmt: usd },
-  { key: 'perps',                   title: 'Daily Perps Volume',      color: '#A855F7', fmt: usd },
   { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd },
 ];
 const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y'];
@@ -619,17 +628,27 @@ function makeTrendCard(t) {
   // Per-card scale; comparisons default to log (the chains span magnitudes).
   const scale = state.trendScales[t.key] || (cmp ? 'log' : 'lin');
   const logScale = scale === 'log';
+  const smooth = !!state.trendSmooth[t.key] && range !== '1d';
+  // Trailing 7-day mean, computed on the full series BEFORE range clipping so
+  // the first visible points still average over real history.
+  const ma7 = pts => pts.map((p, i) => {
+    const w = pts.slice(Math.max(0, i - 6), i + 1);
+    return { d: p.d, v: w.reduce((a, q) => a + q.v, 0) / w.length };
+  });
 
   trendCharts[t.key]?.destroy();
   const el = document.createElement('div');
   el.className = 'panel';
-  const noteTail = (range === '1d' ? ' · latest complete day' : '') + (logScale ? ' · log scale' : '');
+  const noteTail = (range === '1d' ? ' · latest complete day' : '')
+                 + (logScale ? ' · log scale' : '') + (smooth ? ' · 7-day average' : '');
   el.innerHTML = `<div class="crow"><h3>${t.title}</h3>
       <span class="trend-ctl small">${TREND_RANGE_KEYS.map(k =>
         `<button class="tgl" data-crange="${k}" aria-pressed="${k === range}">${k.toUpperCase()}</button>`).join('')}
         <span class="ctl-sep"></span>
         <button class="tgl" data-cscale="lin" aria-pressed="${!logScale}">LIN</button>
-        <button class="tgl" data-cscale="log" aria-pressed="${logScale}">LOG</button></span></div>
+        <button class="tgl" data-cscale="log" aria-pressed="${logScale}">LOG</button>
+        <span class="ctl-sep"></span>
+        <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button></span></div>
     <div class="big num">${t.fmt(last.v)}</div>
     <div class="note">Solana, latest · ${fmtDate(last.d)}${noteTail}</div>
     <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
@@ -644,6 +663,11 @@ function makeTrendCard(t) {
     const fresh = makeTrendCard(t);
     if (fresh) el.replaceWith(fresh);
   }));
+  el.querySelector('[data-csmooth]').addEventListener('click', () => {
+    state.trendSmooth[t.key] = !state.trendSmooth[t.key];
+    const fresh = makeTrendCard(t);
+    if (fresh) el.replaceWith(fresh);
+  });
   const canvas = el.querySelector('canvas');
 
   if (range === '1d') {
@@ -678,11 +702,12 @@ function makeTrendCard(t) {
     const spanDays = Math.max(1, (new Date(last.d) - new Date(cutoff)) / 86400000);
     const unit = spanDays > 720 ? 'year' : spanDays > 120 ? 'month' : 'day';
 
+    const prep = pts => clip(smooth ? ma7(pts) : pts);
     let datasets;
     if (cmp) {
       datasets = CHAINS.filter(c => cmp[c.key]).map(c => ({
         label: c.name,
-        data: clip(cmp[c.key]).filter(p => p.v > 0).map(p => ({ x: p.d, y: p.v })),
+        data: prep(cmp[c.key]).filter(p => p.v > 0).map(p => ({ x: p.d, y: p.v })),
         borderColor: c.color, borderWidth: c.width, order: c.key === 'solana' ? 10 : 1,
         pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: false,
       })).filter(d => d.data.length);
@@ -691,7 +716,7 @@ function makeTrendCard(t) {
            <span class="v num">${t.fmt(cmp[c.key][cmp[c.key].length - 1].v)}</span></span>`).join('');
     } else {
       datasets = [{
-        label: t.title, data: clip(solPts).map(p => ({ x: p.d, y: p.v })),
+        label: t.title, data: prep(solPts).map(p => ({ x: p.d, y: p.v })),
         borderColor: t.color, borderWidth: 1.6, pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: true,
         backgroundColor: ctx => {
           const { chart } = ctx; if (!chart.chartArea) return 'transparent';
