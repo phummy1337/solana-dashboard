@@ -131,6 +131,28 @@
   .ytable td .sym { color: var(--ink); font-weight: 700; }
   .ytable td .tag { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
                     color: #12100B; background: var(--orange); border-radius: 8px; padding: 2px 8px; margin-left: 8px; }
+  /* upgrade cards */
+  .uchip { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+           border-radius: 9px; padding: 3px 9px; white-space: nowrap; flex: none; }
+  .uchip.live    { color: #052E1C; background: var(--mint); }
+  .uchip.pending { color: #12100B; background: var(--orange); }
+  .uchip.dev     { color: #0B1430; background: var(--peri); }
+  .udesc { font-size: 13px; color: var(--peri); font-weight: 600; margin-top: 9px; line-height: 1.45; }
+  .uinfo { position: relative; display: inline-flex; align-items: center; justify-content: center;
+           width: 19px; height: 19px; border-radius: 50%; border: 1px solid var(--line);
+           color: var(--mute); font-size: 11.5px; font-weight: 700; cursor: help; flex: none; margin-left: 8px; }
+  .uinfo:hover, .uinfo:focus { color: var(--ink); border-color: var(--orange); outline: none; }
+  .uinfo .tipbox { position: absolute; bottom: 140%; left: 50%; transform: translateX(-50%);
+                   width: min(310px, 78vw); background: rgba(8,17,38,0.97);
+                   border: 1px solid rgba(143,165,212,0.3); border-radius: 10px; padding: 11px 13px;
+                   font-size: 12.5px; font-weight: 600; color: var(--peri); line-height: 1.5;
+                   opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 30;
+                   box-shadow: 0 12px 32px rgba(0,0,0,0.5); }
+  .uinfo:hover .tipbox, .uinfo:focus .tipbox { opacity: 1; }
+  .tipbox b { color: var(--ink); }
+  /* first-column cards would clip a centered tooltip at the viewport edge */
+  .panel:first-child .uinfo .tipbox { left: 0; transform: none; }
+
   .ytable a.plink { color: var(--peri); text-decoration: none; border-bottom: 1px dotted rgba(143,165,212,0.45); }
   .ytable a.plink:hover { color: var(--ink); border-bottom-color: var(--orange); }
   .ytable tr.apyx td { background: rgba(249,115,22,0.07); border-top-color: rgba(249,115,22,0.35); }
@@ -320,6 +342,11 @@
   </div>
 </section>
 
+<!-- ------------------------------------------------------ network upgrades -->
+<div class="shead"><h2>Network Upgrades</h2><span class="rule"></span>
+  <span class="asof">per <a href="https://solana.com/upgrades" target="_blank" rel="noopener">solana.com/upgrades</a></span></div>
+<section class="grid" id="upgradeGrid"></section>
+
 <footer>
   <span class="fn">Year-to-date figures cover 1 January to the latest complete day and are not annualised. Revenue is Blockworks&rsquo; Network REV (priority fees, base fees and Jito tips), reported in SOL and converted at each day&rsquo;s close.</span>
   <span class="fn">Average transaction fee is total fees divided by total transactions, not a mean of daily averages. Average TPS includes vote transactions. Estimated staking yield assumes inflation accrues to stake and excludes MEV and validator commission.</span>
@@ -502,11 +529,16 @@ const tpsChart = new Chart($('tpsChart'), {
    major L1/L2s (log scale — the chains span orders of magnitude); the rest
    stay single-series off the pre-aggregated data.json series. */
 const CHAINS = [
-  { key: 'solana',   name: 'Solana',   color: '#14F195', width: 2.2 },
-  { key: 'ethereum', name: 'Ethereum', color: '#8FA5D4', width: 1.3 },
-  { key: 'base',     name: 'Base',     color: '#3B82F6', width: 1.3 },
-  { key: 'arbitrum', name: 'Arbitrum', color: '#A855F7', width: 1.3 },
-  { key: 'bnb',      name: 'BNB',      color: '#F0B90B', width: 1.3 },
+  { key: 'solana',    name: 'Solana',      color: '#14F195', width: 2.2 },
+  { key: 'ethereum',  name: 'Ethereum',    color: '#8FA5D4', width: 1.3 },
+  { key: 'base',      name: 'Base',        color: '#3B82F6', width: 1.3 },
+  { key: 'arbitrum',  name: 'Arbitrum',    color: '#A855F7', width: 1.3 },
+  { key: 'bnb',       name: 'BNB',         color: '#F0B90B', width: 1.3 },
+  { key: 'avalanche', name: 'Avalanche',   color: '#E84142', width: 1.3 },
+  { key: 'sui',       name: 'Sui',         color: '#38BDF8', width: 1.3 },
+  { key: 'tron',      name: 'Tron',        color: '#FB923C', width: 1.3 },
+  { key: 'hyperevm',  name: 'Hyperliquid', color: '#0EA5A0', width: 1.3 },
+  { key: 'polygon',   name: 'Polygon',     color: '#E879F9', width: 1.3 },
 ];
 const TRENDS = [
   { key: 'ytd_transactions',        compare: 'transactions',      title: 'Daily Transactions',      color: '#38BDF8', fmt: compact },
@@ -514,7 +546,6 @@ const TRENDS = [
   { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply',       color: '#E9469A', fmt: usd },
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',                color: '#4ADE80', fmt: usd },
   { key: 'perps',                   title: 'Daily Perps Volume',      color: '#A855F7', fmt: usd },
-  { key: 'traders',                 title: 'Daily Active Traders',    color: '#F5A524', fmt: compact },
   { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd },
 ];
 const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y'];
@@ -978,6 +1009,45 @@ function renderYield(y) {
   }
 }
 
+/* --------------------------------------------------------- network upgrades */
+// Mirrors solana.com/upgrades (checked 2026-08-21). Statuses move slowly;
+// update this list when that page changes. Tooltips are the plain-English
+// "what does this mean and why should I care" layer.
+const UPGRADES = [
+  { name: 'Alpenglow', status: 'dev', desc: 'Next-generation consensus protocol targeting ~150 ms finality.',
+    tip: '<b>In simple terms:</b> a rebuild of how validators agree on new blocks. Today a transaction is fully final in ~12 seconds; Alpenglow targets ~150 milliseconds. <b>Why it matters:</b> payments and trades would confirm about as fast as a card swipe, closing the gap with centralized exchanges.' },
+  { name: 'Reduced Slot Times', status: 'pending', desc: 'Cuts block time from 400 ms to 200 ms.',
+    tip: '<b>In simple terms:</b> the network produces blocks twice as often. <b>Why it matters:</b> confirmations land roughly twice as fast and the chain can process more per second — apps feel snappier without any code changes.' },
+  { name: 'Reduced Rent', status: 'pending', desc: 'Cuts on-chain storage deposits by ~90%, phased in over time.',
+    tip: '<b>In simple terms:</b> storing data on Solana requires a refundable deposit ("rent"); this cuts it by about 90%. <b>Why it matters:</b> creating accounts, tokens and app data gets much cheaper, lowering the cost of onboarding users at scale.' },
+  { name: 'Larger Transaction Sizes', status: 'pending', desc: 'Raises the max transaction size from 1,232 to 4,096 bytes.',
+    tip: '<b>In simple terms:</b> each transaction can carry ~3× more instructions and data. <b>Why it matters:</b> complex actions — multi-hop swaps, batched DeFi operations — fit in a single transaction instead of being split apart or failing.' },
+  { name: '100M CU Blocks', status: 'live', desc: 'Raises block capacity from 60M to 100M compute units (+66%).',
+    tip: '<b>In simple terms:</b> each block can hold two-thirds more computation. <b>Why it matters:</b> more transactions land per block during busy periods, which means less congestion and steadier fees.' },
+  { name: 'Optimized Token Program', status: 'live', desc: 'Token operations use up to 98% less compute.',
+    tip: '<b>In simple terms:</b> the code behind token transfers was rewritten to be drastically cheaper for the network to run. <b>Why it matters:</b> the most common operation on Solana now takes a sliver of the block space it used to, freeing capacity for everything else.' },
+  { name: 'XDP on Solana', status: 'live', desc: 'Kernel-bypass networking for faster block propagation.',
+    tip: '<b>In simple terms:</b> validators send and receive block data straight from the network card, skipping slow operating-system layers. <b>Why it matters:</b> blocks spread through the network faster, keeping slot times steady and forks rarer.' },
+  { name: 'BLS Pubkey & Validator Admission Ticket', status: 'live', desc: 'Validators register BLS keys to keep participating in consensus.',
+    tip: '<b>In simple terms:</b> validators register a new type of cryptographic key that lets thousands of votes be checked as one. <b>Why it matters:</b> it is the groundwork for Alpenglow — fast finality needs vote aggregation, and this gets every validator ready for it.' },
+  { name: 'New Cryptography Schemes', status: 'dev', desc: 'Native BN254 G2 and BLS12-381 curve operations.',
+    tip: '<b>In simple terms:</b> the math used by zero-knowledge proofs gets built into the network itself instead of being computed the slow way. <b>Why it matters:</b> privacy features, ZK bridges and rollup-style apps become far cheaper and more practical on Solana.' },
+];
+const U_STATUS = { live: 'Live on Mainnet', pending: 'Pending Activation', dev: 'In Development' };
+
+function renderUpgrades() {
+  $('upgradeGrid').innerHTML = UPGRADES.map(u => `
+    <div class="panel">
+      <div class="crow">
+        <h3 style="display:flex;align-items:center">${u.name}
+          <span class="uinfo" tabindex="0" role="button" aria-label="What this means">?<span class="tipbox">${u.tip}</span></span>
+        </h3>
+        <span class="uchip ${u.status}">${U_STATUS[u.status]}</span>
+      </div>
+      <div class="udesc">${u.desc}</div>
+    </div>`).join('');
+}
+
 /* ------------------------------------------------------------ uptime panel */
 // Documented full mainnet-beta outages (Helius, "A Complete History of Solana
 // Outages"). Degraded-performance periods with no halt (Jan 2022) are excluded.
@@ -1018,6 +1088,7 @@ function renderUptime() {
 /* ------------------------------------------------------------------- boot */
 (async function boot() {
   renderUptime();
+  renderUpgrades();
   await Promise.all([loadData(), loadNetwork(), loadSupply()]);
   await loadValidators();
   setInterval(async () => { await loadNetwork(); loadValidators(); }, CONFIG.NET_REFRESH_MS);
