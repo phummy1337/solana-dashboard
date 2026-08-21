@@ -61,7 +61,7 @@
   @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
 
   /* section heading rule */
-  .shead { display: flex; align-items: center; gap: 14px; padding: 30px 48px 0; }
+  .shead { display: flex; align-items: center; gap: 14px; padding: 46px 48px 0; }
   .shead h2 { font-size: 17px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink); white-space: nowrap; }
   .shead .rule { flex: 1; height: 1px; background: var(--line-2); }
   .shead .asof { font-size: 12px; font-weight: 600; color: var(--mute); font-style: italic; white-space: nowrap; }
@@ -92,7 +92,11 @@
   /* Side-by-side: activity tiles left, price chart right. The chart column
      flexes so the canvas grows to match the tile column's height. */
   .split { display: grid; grid-template-columns: minmax(360px, 5fr) 7fr; gap: 0 28px; padding: 0 48px; }
+  .split-left, .split-right { min-width: 0; }
   .split .shead, .split .tiles, .split .controls, .split .stage { padding-left: 0; padding-right: 0; }
+  /* Narrow columns: let the "as of" stamp wrap below instead of overflowing */
+  .split .shead { flex-wrap: wrap; row-gap: 4px; }
+  .split .shead .asof { white-space: normal; }
   .split-right { display: flex; flex-direction: column; }
   .split-right .stage { flex: 1; display: flex; flex-direction: column; }
   .split-right .stage .wrap { flex: 1; height: auto; min-height: 360px; max-height: none; }
