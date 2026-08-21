@@ -47,6 +47,11 @@
   .sol-logo { height: 0.78em; width: auto; flex: none; }
   .subtitle { color: var(--peri); font-size: clamp(14px, 1.3vw, 19px); font-weight: 600; margin-top: 8px; }
 
+  .hright { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; flex: none; }
+  .dfdv { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .dfdv .builtby { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
+  .dfdv img { height: clamp(18px, 1.7vw, 25px); display: block; }
+  .dfdv:hover .builtby { color: var(--peri); }
   .live { display: flex; align-items: center; gap: 9px; background: var(--panel); border: 1px solid var(--line);
           border-radius: 20px; padding: 8px 15px; font-size: 12px; font-weight: 700;
           letter-spacing: .09em; text-transform: uppercase; color: var(--peri); white-space: nowrap; }
@@ -212,7 +217,13 @@
     </svg>State of Solana</h1>
     <p class="subtitle">Keep tabs on Solana in real-time.</p>
   </div>
-  <div class="live" id="live" title="Data freshness"><span class="dot"></span><span id="liveText">loading</span></div>
+  <div class="hright">
+    <a class="dfdv" href="https://defidevcorp.com" target="_blank" rel="noopener" title="DeFi Development Corp">
+      <span class="builtby">Built by</span>
+      <img src="dfdv-logo.png" alt="DeFi Development Corp">
+    </a>
+    <div class="live" id="live" title="Data freshness"><span class="dot"></span><span id="liveText">loading</span></div>
+  </div>
 </header>
 
 <!-- ---------------------------------------------------------------- price -->
@@ -1057,12 +1068,13 @@ function renderYield(y) {
   let html = '';
   if (y.apyusd) {
     const a = y.apyusd;
-    html += row(a, 'apyx', `<b>${usd(a.tvl_protocol)}</b>`);
+    html += row(a, 'apyx', `<b>${usd(a.tvl_reserves ?? a.tvl_protocol)}</b>`);
   }
   html += (y.items || []).map(r => row(r, '', `<b>${usd(r.tvl_total ?? r.tvl)}</b>`)).join('');
   tb.innerHTML = html;
   $('yieldNote').textContent =
-    'TVL is each product’s combined total across chains (DefiLlama). ' +
+    'apyUSD TVL is Apyx protocol reserves per accountable.apyx.fi (proof of solvency). ' +
+    'Other TVLs are each product’s combined total across chains (DefiLlama). ' +
     'Products qualify with a Solana market above $10M TVL.';
 }
 
