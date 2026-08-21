@@ -170,6 +170,16 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         warn(f"spot price: {e}")
 
+    # 24h return from the rolling-24h OHLCV open vs the live spot quote.
+    try:
+        o = bw("v1/assets/solana/ohlcv")
+        cur = spot or o.get("close")
+        if o.get("open") and cur:
+            stats["return_24h"] = (cur / o["open"] - 1) * 100
+            print(f"  24h return: {stats['return_24h']:+.2f}%")
+    except Exception as e:  # noqa: BLE001
+        warn(f"ohlcv 24h: {e}")
+
     if prices:
         latest_date = max(prices)
         # Prefer the live spot quote; fall back to the last daily close.
@@ -200,7 +210,7 @@ def main() -> int:
             stats[key] = sum(y.values())
             stats[f"{key}_days"] = len(y)
             if also_series:
-                data["series"][key] = [{"d": d, "v": s[d]} for d in sorted(s) if d >= f"{YEAR - 2}-01-01"]
+                data["series"][key] = [{"d": d, "v": s[d]} for d in sorted(s) if d >= f"{YEAR - 5}-01-01"]
             print(f"  {slug}: YTD {stats[key]:,.0f} over {len(y)} days")
             return s
         except Exception as e:  # noqa: BLE001
@@ -256,7 +266,7 @@ def main() -> int:
             if ytd_open:
                 stats["defi_tvl_ytd_change"] = ((stats["defi_tvl"] / ytd_open) - 1) * 100
             data["series"]["defi_tvl"] = [
-                {"d": d, "v": tvl[d]} for d in sorted(tvl) if d >= f"{YEAR - 2}-01-01"
+                {"d": d, "v": tvl[d]} for d in sorted(tvl) if d >= f"{YEAR - 5}-01-01"
             ]
             print(f"  DeFi TVL: ${stats['defi_tvl']:,.0f} ({max(tvl)})")
     except Exception as e:  # noqa: BLE001
@@ -272,7 +282,7 @@ def main() -> int:
             if ytd_open:
                 stats["stablecoin_supply_ytd_change"] = ((stats["stablecoin_supply"] / ytd_open) - 1) * 100
             data["series"]["stablecoin_supply"] = [
-                {"d": d, "v": s[d]} for d in sorted(s) if d >= f"{YEAR - 2}-01-01"
+                {"d": d, "v": s[d]} for d in sorted(s) if d >= f"{YEAR - 5}-01-01"
             ]
             print(f"  stablecoin supply: ${stats['stablecoin_supply']:,.0f}")
     except Exception as e:  # noqa: BLE001
@@ -305,56 +315,64 @@ def main() -> int:
         warn(f"network REV chart: {e}")
 
     # -------------------------------------------------------- active traders
+    # Full history for the trend chart's longer ranges; stats stay YTD.
+    series_since = f"{YEAR - 5}-01-01"
     try:
-        rows = chart_rows(CHARTS["traders"][0], stop_before=f"{YEAR}-01-01")
+        rows = chart_rows(CHARTS["traders"][0])
         vals = {}
         for r in rows:
             d = row_date(r)
-            if d and d >= YTD_START.isoformat() and r.get("unique_traders") is not None:
+            if d and r.get("unique_traders") is not None:
                 vals[d] = r["unique_traders"]
-        if vals:
-            stats["avg_daily_traders_ytd"] = sum(vals.values()) / len(vals)
+        y = ytd(vals)
+        if y:
+            stats["avg_daily_traders_ytd"] = sum(y.values()) / len(y)
             daily["traders"] = vals[max(vals)]
-            data["series"]["traders"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
-            print(f"  avg daily traders YTD: {stats['avg_daily_traders_ytd']:,.0f} over {len(vals)} days")
+            print(f"  avg daily traders YTD: {stats['avg_daily_traders_ytd']:,.0f} over {len(y)} days")
+        if vals:
+            data["series"]["traders"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
     except Exception as e:  # noqa: BLE001
         warn(f"daily active traders chart: {e}")
 
     # ----------------------------------------------------------- perps volume
     try:
-        rows = chart_rows(CHARTS["perps"][0], stop_before=f"{YEAR}-01-01")
+        rows = chart_rows(CHARTS["perps"][0])
         # The series carries one row per symbol plus a rolled-up "Total" row;
         # summing everything would double count.
         vals = {}
         for r in rows:
             d = row_date(r)
-            if d and d >= YTD_START.isoformat() and r.get("symbol") == "Total" and r.get("vol_totals") is not None:
+            if d and r.get("symbol") == "Total" and r.get("vol_totals") is not None:
                 vals[d] = r["vol_totals"]
-        if vals:
-            stats["ytd_perps_volume"] = sum(vals.values())
-            stats["ytd_perps_days"] = len(vals)
+        y = ytd(vals)
+        if y:
+            stats["ytd_perps_volume"] = sum(y.values())
+            stats["ytd_perps_days"] = len(y)
             daily["perps_volume"] = vals[max(vals)]
-            data["series"]["perps"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
-            print(f"  YTD perps volume: ${stats['ytd_perps_volume']:,.0f} over {len(vals)} days")
+            print(f"  YTD perps volume: ${stats['ytd_perps_volume']:,.0f} over {len(y)} days")
         else:
             warn("perps chart: no rows with symbol='Total' in YTD range")
+        if vals:
+            data["series"]["perps"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
     except Exception as e:  # noqa: BLE001
         warn(f"perps chart: {e}")
 
     # ------------------------------------------------------ tokenized equity
     try:
-        rows = chart_rows(CHARTS["tokeq_vol"][0], stop_before=f"{YEAR}-01-01")
+        rows = chart_rows(CHARTS["tokeq_vol"][0])
         vals: dict[str, float] = {}
         for r in rows:
             d = row_date(r)
-            if d and d >= YTD_START.isoformat() and r.get("volume_usd") is not None:
+            if d and r.get("volume_usd") is not None:
                 # Rows are per-issuer, so accumulate rather than assign.
                 vals[d] = vals.get(d, 0) + r["volume_usd"]
-        if vals:
-            stats["ytd_tokenized_equity_volume"] = sum(vals.values())
+        y = ytd(vals)
+        if y:
+            stats["ytd_tokenized_equity_volume"] = sum(y.values())
             daily["tokenized_equity_volume"] = vals[max(vals)]
-            data["series"]["tokenized_equity_volume"] = [{"d": d, "v": v} for d, v in sorted(vals.items())]
             print(f"  YTD tokenized equity volume: ${stats['ytd_tokenized_equity_volume']:,.0f}")
+        if vals:
+            data["series"]["tokenized_equity_volume"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
     except Exception as e:  # noqa: BLE001
         warn(f"tokenized equity volume chart: {e}")
 
@@ -380,7 +398,7 @@ def main() -> int:
     # Multi-project series for the trend charts. Kept separate from "series"
     # so the single-chain cards stay untouched.
     compare: dict = {}
-    since = f"{YEAR - 2}-01-01"
+    since = f"{YEAR - 5}-01-01"
 
     def compare_metric(slug: str, key: str) -> None:
         try:
