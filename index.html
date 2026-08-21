@@ -114,6 +114,12 @@
   }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; padding: 14px 48px 0; }
+  .panel.wide { grid-column: 1 / -1; }
+  /* At exactly three columns the four health panels leave two empty cells;
+     let the stake panel slot in beside Network Uptime instead of full width. */
+  @media (min-width: 1055px) and (max-width: 1377px) {
+    .panel.wide { grid-column: span 2; }
+  }
   .panel { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 17px 19px; }
   .panel h3 { font-size: 14px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
   .panel .big { font-size: 25px; font-weight: 700; margin-top: 6px; }
@@ -364,7 +370,7 @@
     </div>
   </div>
 
-  <div class="panel" style="grid-column: 1 / -1;">
+  <div class="panel wide">
     <h3>Stake Distribution — top validators</h3>
     <div class="big"><span class="num" id="topShare">—</span></div>
     <div class="note">Share of active stake held by the ten largest validators</div>
