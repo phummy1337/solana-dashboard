@@ -48,10 +48,10 @@
   .subtitle { color: var(--peri); font-size: clamp(14px, 1.3vw, 19px); font-weight: 600; margin-top: 8px; }
 
   .hright { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; flex: none; }
-  .dfdv { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-  .dfdv .builtby { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
-  .dfdv img { height: clamp(18px, 1.7vw, 25px); display: block; }
-  .dfdv:hover .builtby { color: var(--peri); }
+  .dfdv { display: flex; align-items: center; gap: 8px; text-decoration: none; opacity: 0.65; transition: opacity .15s; }
+  .dfdv:hover { opacity: 1; }
+  .dfdv .builtby { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
+  .dfdv img { height: clamp(13px, 1.15vw, 16px); display: block; }
   .live { display: flex; align-items: center; gap: 9px; background: var(--panel); border: 1px solid var(--line);
           border-radius: 20px; padding: 8px 15px; font-size: 12px; font-weight: 700;
           letter-spacing: .09em; text-transform: uppercase; color: var(--peri); white-space: nowrap; }
@@ -635,6 +635,107 @@ function buildTrends() {
   }
 }
 
+/* ------------------------------------------------------ trend card export */
+let _dfdvImg = null;
+function dfdvLogo() {
+  _dfdvImg ??= new Promise(res => {
+    const i = new Image();
+    i.onload = () => res(i); i.onerror = () => res(null);
+    i.src = 'dfdv-logo.png';
+  });
+  return _dfdvImg;
+}
+
+/* Renders the card as a branded share image: whatever the chart currently
+   shows (range, scale, smooth, variant), plus the DFDV mark and a CTA. */
+async function buildTrendImage(key, title, fmt, el) {
+  const chart = trendCharts[key];
+  if (!chart) return null;
+  const logo = await dfdvLogo();
+  const S = 2, W = 1200, PAD = 48;
+  const src = chart.canvas;
+  const chartW = W - PAD * 2;
+  const chartH = Math.round(chartW * src.height / src.width);
+
+  let items;
+  if (chart.config.type === 'bar') {
+    const ds = chart.data.datasets[0];
+    items = chart.data.labels.map((l, i) => ({
+      label: l, color: Array.isArray(ds.borderColor) ? ds.borderColor[i] : ds.borderColor,
+      val: ds.data[i] }));
+  } else {
+    items = chart.data.datasets.map(d => ({
+      label: d.label, color: d.borderColor, val: d.data[d.data.length - 1]?.y }));
+  }
+
+  const big = el.querySelector('.big').textContent.trim();
+  const note = el.querySelector('.note').textContent.trim();
+
+  // pre-measure legend wrapping
+  const probe = document.createElement('canvas').getContext('2d');
+  probe.font = '600 13px Syne, sans-serif';
+  let lx = PAD, rows = 1;
+  const laid = items.map(it => {
+    const txt = `${it.label}  ${it.val != null ? fmt(it.val) : ''}`;
+    const w = probe.measureText(txt).width + 26;
+    if (lx + w > W - PAD) { lx = PAD; rows++; }
+    const pos = { txt, x: lx, row: rows, color: it.color };
+    lx += w + 18;
+    return pos;
+  });
+
+  const legendTop = 158 + chartH + 26;
+  const H = legendTop + rows * 28 + 84;
+  const cv = document.createElement('canvas');
+  cv.width = W * S; cv.height = H * S;
+  const g = cv.getContext('2d');
+  g.scale(S, S);
+
+  const bg = g.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0A1633'); bg.addColorStop(1, '#030815');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+
+  g.fillStyle = '#F1F5FB'; g.font = '700 26px Syne, sans-serif';
+  g.fillText(title, PAD, 58);
+  g.font = '700 30px ui-sans-serif, system-ui, sans-serif';
+  g.fillText(big, PAD, 98);
+  g.fillStyle = '#8FA5D4'; g.font = '600 14px Syne, sans-serif';
+  g.fillText(note, PAD, 126);
+
+  g.drawImage(src, PAD, 158, chartW, chartH);
+
+  g.font = '600 13px Syne, sans-serif';
+  for (const p of laid) {
+    const y = legendTop + (p.row - 1) * 28;
+    g.fillStyle = p.color; g.fillRect(p.x, y - 9, 14, 5);
+    g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + 20, y);
+  }
+
+  const fy = H - 60;
+  g.strokeStyle = 'rgba(143,165,212,0.15)';
+  g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
+  if (logo) {
+    const lh = 20, lw = lh * logo.width / logo.height;
+    g.drawImage(logo, PAD, fy + 18, lw, lh);
+  }
+  g.fillStyle = '#F97316'; g.font = '700 15px Syne, sans-serif';
+  const cta = 'Visit stateofsol.com →';
+  g.fillText(cta, W - PAD - g.measureText(cta).width, fy + 33);
+  return cv;
+}
+
+async function downloadTrendImage(key, title, fmt, el, range) {
+  const cv = await buildTrendImage(key, title, fmt, el);
+  if (!cv) return;
+  cv.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = `state-of-solana-${key.replace(/_/g, '-')}-${range}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }, 'image/png');
+}
+
 /* One card, at its own range; re-made in place when its range buttons change. */
 function makeTrendCard(t) {
   const orig = t;
@@ -676,7 +777,9 @@ function makeTrendCard(t) {
         <button class="tgl" data-cscale="lin" aria-pressed="${!logScale}">LIN</button>
         <button class="tgl" data-cscale="log" aria-pressed="${logScale}">LOG</button>
         <span class="ctl-sep"></span>
-        <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button></span></div>
+        <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button>
+        <span class="ctl-sep"></span>
+        <button class="tgl" data-cdl title="Download this chart as PNG">⤓ PNG</button></span></div>
     ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
         `<button class="tgl" data-cvariant="${v.id}" aria-pressed="${v.id === variant.id}">${v.label}</button>`).join('')}</div>` : ''}
     <div class="big num">${t.fmt(last.v)}</div>
@@ -703,6 +806,8 @@ function makeTrendCard(t) {
     const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   }));
+  el.querySelector('[data-cdl]').addEventListener('click', () =>
+    downloadTrendImage(orig.key, t.title, t.fmt, el, range));
   const canvas = el.querySelector('canvas');
 
   if (range === '1d') {
