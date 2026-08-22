@@ -125,21 +125,18 @@
     .split { grid-template-columns: 1fr; }
     .split-right .stage .wrap { flex: none; height: 44vh; min-height: 320px; max-height: 460px; }
   }
-  /* Full-screen price chart: same navy ground, chart fills the display */
-  .split-right:fullscreen, .split-right:-webkit-full-screen {
+  /* Expanded price chart: centered popup over a dimmed backdrop */
+  #fsBackdrop { display: none; position: fixed; inset: 0; z-index: 999;
+                background: rgba(2, 5, 14, 0.72); backdrop-filter: blur(2px); }
+  .split-right.fs-popup {
+    position: fixed; inset: 4vh 5vw; z-index: 1000;
     background: linear-gradient(180deg, #0A1633 0%, #060E26 60%, #030815 100%);
-    padding: 26px 48px 34px; overflow: auto;
+    border: 1px solid var(--line); border-radius: 16px;
+    padding: 22px 34px 30px; overflow: auto;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
   }
-  .split-right:fullscreen .stage .wrap, .split-right:-webkit-full-screen .stage .wrap {
-    flex: 1; height: auto; max-height: none; min-height: 0;
-  }
-  /* CSS overlay fallback for browsers that refuse element fullscreen (iOS) */
-  .split-right.fs-fallback {
-    position: fixed; inset: 0; z-index: 1000;
-    background: linear-gradient(180deg, #0A1633 0%, #060E26 60%, #030815 100%);
-    padding: 26px 48px 34px; overflow: auto;
-  }
-  .split-right.fs-fallback .stage .wrap { flex: 1; height: auto; max-height: none; min-height: 0; }
+  .split-right.fs-popup .stage .wrap { flex: 1; height: auto; max-height: none; min-height: 0; }
+  @media (max-width: 760px) { .split-right.fs-popup { inset: 2vh 2vw; padding: 16px 16px 20px; } }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; padding: 14px 48px 0; }
   .panel.wide { grid-column: 1 / -1; }
@@ -296,7 +293,7 @@
   <div class="split-right">
     <div class="shead"><h2>SOL Price History</h2><span class="rule"></span>
       <button class="tgl" id="priceDl" title="Download this chart as PNG">⤓ PNG</button>
-      <button class="tgl" id="priceFs" title="View full screen">⛶ Full screen</button></div>
+      <button class="tgl" id="priceFs" title="Expand the chart">⛶ Expand</button></div>
     <div class="controls">
       <span class="ctl-label">Range</span>
       <button class="tgl" data-range="90"   aria-pressed="false">3M</button>
@@ -334,6 +331,8 @@
   <span class="rule"></span><span class="asof">daily · Blockworks</span>
 </div>
 <section class="grid" id="trendGrid"></section>
+
+<div id="fsBackdrop"></div>
 
 <!-- ------------------------------------------------- yield-bearing stables -->
 <div class="shead"><h2>Top Yields on Solana</h2><span class="rule"></span></div>
@@ -1238,30 +1237,19 @@ function setScale(scale) {
     o.setAttribute('aria-pressed', String(o.dataset.scale === scale)));
 }
 $('priceDl').addEventListener('click', downloadPriceImage);
-function syncFsUi() {
-  const active = !!document.fullscreenElement
-    || document.querySelector('.split-right').classList.contains('fs-fallback');
-  $('priceFs').textContent = active ? '✕ Exit full screen' : '⛶ Full screen';
+function setPricePopup(open) {
+  document.querySelector('.split-right').classList.toggle('fs-popup', open);
+  $('fsBackdrop').style.display = open ? 'block' : 'none';
+  document.body.style.overflow = open ? 'hidden' : '';
+  $('priceFs').textContent = open ? '✕ Close' : '⛶ Expand';
   setTimeout(() => priceChart.resize(), 80);
 }
-$('priceFs').addEventListener('click', async () => {
-  const el = document.querySelector('.split-right');
-  if (document.fullscreenElement) { document.exitFullscreen(); return; }
-  if (el.classList.contains('fs-fallback')) { el.classList.remove('fs-fallback'); syncFsUi(); return; }
-  try {
-    await (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
-  } catch {
-    // No element-fullscreen (iOS Safari, restrictive contexts) — CSS overlay.
-    el.classList.add('fs-fallback');
-    syncFsUi();
-  }
-});
-document.addEventListener('fullscreenchange', syncFsUi);
+$('priceFs').addEventListener('click', () =>
+  setPricePopup(!document.querySelector('.split-right').classList.contains('fs-popup')));
+$('fsBackdrop').addEventListener('click', () => setPricePopup(false));
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    const el = document.querySelector('.split-right');
-    if (el.classList.contains('fs-fallback')) { el.classList.remove('fs-fallback'); syncFsUi(); }
-  }
+  if (e.key === 'Escape' && document.querySelector('.split-right').classList.contains('fs-popup'))
+    setPricePopup(false);
 });
 $('rainbowBtn').addEventListener('click', () => {
   state.rainbow = !state.rainbow;
