@@ -143,6 +143,7 @@
     .split .controls { flex-wrap: nowrap; gap: 6px; }
     .split .controls .ctl-label { display: none; }
     .split .controls button.tgl { padding: 6px 11px; font-size: 12.5px; white-space: nowrap; }
+    .split .controls select.rsel { padding: 6px 10px; font-size: 12.5px; }
     .split .controls #rainbowBtn { margin-left: 4px !important; }
   }
   @media (max-width: 1180px) {
@@ -190,9 +191,10 @@
   .trend-ctl.small { gap: 3px; }
   .trend-ctl.small .tgl { padding: 2px 7px; font-size: 10px; border-radius: 9px; }
   .ctl-sep { width: 1px; height: 14px; background: var(--line); margin: 0 4px; align-self: center; }
-  select.rsel { font-family: Syne; font-size: 11px; font-weight: 700; color: var(--peri);
-                background: var(--panel); border: 1px solid rgba(143,165,212,0.2); border-radius: 12px;
-                padding: 3px 8px; cursor: pointer; appearance: auto; }
+  select.rsel { font-family: Syne; font-size: 14px; font-weight: 700; color: var(--peri);
+                background: var(--panel); border: 1px solid rgba(143,165,212,0.2); border-radius: 20px;
+                padding: 7px 12px; cursor: pointer; appearance: auto; }
+  .trend-ctl.small select.rsel { font-size: 10px; padding: 2px 6px; border-radius: 9px; }
   select.rsel:hover { color: var(--ink); border-color: rgba(143,165,212,0.4); }
   select.rsel:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
   select.rsel option { background: #0D1A34; color: var(--ink); }
