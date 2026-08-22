@@ -40,7 +40,7 @@
     --line-2: rgba(143, 165, 212, 0.08);
     --neg:    #FF6B6B;
   }
-  html, body { height: 100%; margin: 0; background: #030815; }
+  html, body { height: 100%; margin: 0; background: #030815; overflow-x: clip; }
   body {
     background:
       radial-gradient(80% 50% at 20% 0%, rgba(40,70,140,0.30) 0%, transparent 55%) fixed,
@@ -104,7 +104,7 @@
 
   /* Side-by-side: activity tiles left, price chart right. The chart column
      flexes so the canvas grows to match the tile column's height. */
-  .split { display: grid; grid-template-columns: minmax(360px, 5fr) 7fr; gap: 0 28px; padding: 0 48px; }
+  .split { display: grid; grid-template-columns: minmax(340px, 4fr) 8fr; gap: 0 28px; padding: 0 48px; }
   .split-left, .split-right { min-width: 0; }
   .split .shead, .split .tiles, .split .controls, .split .stage { padding-left: 0; padding-right: 0; }
   /* Narrow columns: let the "as of" stamp wrap below instead of overflowing */
@@ -204,8 +204,9 @@
   .tipbox b { font-weight: 700; }
   .uinfo:hover .tipbox, .uinfo:focus .tipbox { opacity: 1; }
   .tipbox b { color: var(--ink); }
-  /* first-column cards would clip a centered tooltip at the viewport edge */
-  .panel:first-child .uinfo .tipbox { left: 0; transform: none; }
+  /* edge-aware flips, applied by JS when a centered tooltip would clip */
+  .uinfo .tipbox.flip-left { left: auto; right: 0; transform: none; }
+  .uinfo .tipbox.flip-right { left: 0; transform: none; }
 
   .ytable a.plink { color: var(--peri); text-decoration: none; border-bottom: 1px dotted rgba(143,165,212,0.45); }
   .ytable a.plink:hover { color: var(--ink); border-bottom-color: var(--orange); }
@@ -1309,6 +1310,16 @@ $('fsBackdrop').addEventListener('click', () => setPricePopup(false));
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.querySelector('.split-right').classList.contains('fs-popup'))
     setPricePopup(false);
+});
+// Keep hover tooltips on-screen: flip alignment when a centered box would clip.
+for (const evt of ['mouseover', 'focusin']) document.addEventListener(evt, e => {
+  const info = e.target.closest?.('.uinfo');
+  const tip = info?.querySelector('.tipbox');
+  if (!tip) return;
+  tip.classList.remove('flip-left', 'flip-right');
+  const r = tip.getBoundingClientRect();
+  if (r.right > innerWidth - 8) tip.classList.add('flip-left');
+  else if (r.left < 8) tip.classList.add('flip-right');
 });
 $('rainbowBtn').addEventListener('click', () => {
   state.rainbow = !state.rainbow;
