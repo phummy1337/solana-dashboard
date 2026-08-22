@@ -802,7 +802,16 @@ async function buildShareImage(src, title, note, items, fmt) {
   g.font = '600 13px Syne, sans-serif';
   for (const p of laid) {
     const y = legendTop + (p.row - 1) * 28;
-    g.fillStyle = p.color; g.fillRect(p.x, y - 9, 14, 5);
+    if (Array.isArray(p.color)) {
+      // dual-color candle swatch: diagonal split, up-color over down-color
+      const s = 13, sx = p.x, sy = y - 11;
+      g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + s, sy); g.lineTo(sx, sy + s); g.closePath();
+      g.fillStyle = p.color[0]; g.fill();
+      g.beginPath(); g.moveTo(sx + s, sy); g.lineTo(sx + s, sy + s); g.lineTo(sx, sy + s); g.closePath();
+      g.fillStyle = p.color[1]; g.fill();
+    } else {
+      g.fillStyle = p.color; g.fillRect(p.x, y - 9, 14, 5);
+    }
     g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + 20, y);
   }
 
@@ -856,13 +865,14 @@ async function downloadPriceImage() {
   const sel = $('priceRange');
   const rangeLabel = sel.options[sel.selectedIndex]?.text || '';
   let note = `${rangeLabel} · ${state.scale === 'logarithmic' ? 'log' : 'linear'} scale`;
-  let items = [{ label: 'SOL', color: '#F97316', val: last.y }];
+  let items = [{ label: 'SOL', color: [CANDLE_UP, CANDLE_DOWN], val: last.y }];
   if (state.rainbow) {
     note += ` · rainbow bands · zone: ${zoneFor(last.x, last.y)}`;
     items = items.concat(RB.KEYS.map(k => ({
       label: RB.NAMES[String(k)], color: RB.COLORS[String(k)], val: bandAt(last.x, k) })));
   }
-  const cv = await buildShareImage(priceChart.canvas, 'SOL Price History', note, items, price);
+  const title = state.rainbow ? "DFDV's Solana Rainbow Chart" : 'SOL Price History';
+  const cv = await buildShareImage(priceChart.canvas, title, note, items, price);
   if (cv) saveCanvas(cv, `state-of-solana-sol-price-${state.range}.png`);
 }
 
