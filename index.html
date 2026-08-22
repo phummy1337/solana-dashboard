@@ -1276,6 +1276,42 @@ async function loadValidators() {
   }
 }
 
+/* Blockworks' daily price series lags a day or two; splice the most recent
+   daily closes from CoinGecko so the candles reach today, then keep the
+   forming candle live with a spot tick every few minutes. */
+function mergePricePoints(pairs) {
+  const m = new Map(state.priceSeries.map(p => [p.x, p.y]));
+  for (const [d, v] of pairs) if (v != null) m.set(d, v);
+  state.priceSeries = [...m.entries()].map(([x, y]) => ({ x, y })).sort((a, b) => a.x < b.x ? -1 : 1);
+}
+async function extendPriceSeries() {
+  try {
+    const r = await fetch('https://api.coingecko.com/api/v3/coins/solana/market_chart?vs_currency=usd&days=30&interval=daily');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const lastBW = state.priceSeries[state.priceSeries.length - 1]?.x || '';
+    mergePricePoints((j.prices || [])
+      .map(([t, p]) => [new Date(t).toISOString().slice(0, 10), p])
+      .filter(([d]) => d > lastBW));
+    drawPrice();
+  } catch (e) {
+    console.warn('price splice failed; candles end at the Blockworks close', e);
+  }
+}
+async function tickSpotPrice() {
+  try {
+    const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+    const p = (await r.json()).solana?.usd;
+    if (!p) return;
+    mergePricePoints([[new Date().toISOString().slice(0, 10), p]]);
+    drawPrice();
+    $('t_price').textContent = price(p);
+    $('t_price_sub').textContent = 'live quote';
+  } catch (e) {
+    console.warn('spot tick failed', e);
+  }
+}
+
 /* Total supply drives the staked-percentage figure; the public RPC blocks
    getSupply, so derive it from inflation-adjusted genesis-free sources instead. */
 async function loadSupply() {
@@ -1458,8 +1494,11 @@ function renderUptime() {
   renderUptime();
   renderUpgrades();
   await Promise.all([loadData(), loadNetwork(), loadSupply()]);
+  await extendPriceSeries();
+  tickSpotPrice();
   await loadValidators();
   setInterval(async () => { await loadNetwork(); loadValidators(); }, CONFIG.NET_REFRESH_MS);
+  setInterval(tickSpotPrice, 5 * 60 * 1000);
 })();
 </script>
 </body>
