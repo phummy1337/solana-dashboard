@@ -313,11 +313,13 @@
       <button class="tgl" id="priceFs" title="Expand the chart">⛶ Expand</button></div>
     <div class="controls">
       <span class="ctl-label">Range</span>
-      <button class="tgl" data-range="90"   aria-pressed="false">3M</button>
-      <button class="tgl" data-range="ytd"  aria-pressed="false">YTD</button>
-      <button class="tgl" data-range="365"  aria-pressed="false">1Y</button>
-      <button class="tgl" data-range="1826" aria-pressed="false">5Y</button>
-      <button class="tgl" data-range="all"  aria-pressed="true">All</button>
+      <select class="rsel" id="priceRange" aria-label="Time period">
+        <option value="90">3M</option>
+        <option value="ytd">YTD</option>
+        <option value="365">1Y</option>
+        <option value="1826">5Y</option>
+        <option value="all" selected>All</option>
+      </select>
       <button class="tgl" id="rainbowBtn" aria-pressed="true" style="margin-left:10px">🌈 SOL Rainbow</button>
       <span class="spacer"></span>
       <span class="ctl-label">Scale</span>
@@ -851,8 +853,8 @@ async function downloadTrendImage(key, title, fmt, el, range) {
 async function downloadPriceImage() {
   const last = state.priceSeries[state.priceSeries.length - 1];
   if (!last) return;
-  const rangeLabel = [...document.querySelectorAll('[data-range]')]
-    .find(b => b.getAttribute('aria-pressed') === 'true')?.textContent || '';
+  const sel = $('priceRange');
+  const rangeLabel = sel.options[sel.selectedIndex]?.text || '';
   let note = `${rangeLabel} · ${state.scale === 'logarithmic' ? 'log' : 'linear'} scale`;
   let items = [{ label: 'SOL', color: '#F97316', val: last.y }];
   if (state.rainbow) {
@@ -1278,11 +1280,10 @@ async function loadSupply() {
 }
 
 /* -------------------------------------------------------------- controls */
-document.querySelectorAll('[data-range]').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('[data-range]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
-  state.range = b.dataset.range;
+$('priceRange').addEventListener('change', e => {
+  state.range = e.target.value;
   drawPrice();
-}));
+});
 document.querySelectorAll('[data-scale]').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('[data-scale]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
   state.scale = b.dataset.scale;
