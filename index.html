@@ -546,6 +546,16 @@ function bandAt(dateStr, idx) {
   const trend = Math.pow(10, 1.2 + 4.5 * Math.log10(h));
   return idx === 0 ? trend : trend * Math.pow(10, idx * Math.pow(0.79, h + 1) / 3);
 }
+/* Zone as colorable segments: band names carry their band's color. */
+function zoneParts(dateStr, close) {
+  const vals = RB.KEYS.map(k => bandAt(dateStr, k));
+  const seg = k => ({ t: RB.NAMES[String(k)], c: RB.COLORS[String(k)] });
+  if (close < vals[0]) return [{ t: 'Below ' }, seg(-3)];
+  for (let j = 0; j < vals.length - 1; j++)
+    if (close >= vals[j] && close < vals[j + 1])
+      return [seg(RB.KEYS[j]), { t: ' → ' }, seg(RB.KEYS[j + 1])];
+  return [{ t: 'Above ' }, seg(5)];
+}
 function zoneFor(dateStr, close) {
   const vals = RB.KEYS.map(k => bandAt(dateStr, k));
   if (close < vals[0]) return 'Below “' + RB.NAMES['-3'] + '”';
@@ -789,8 +799,19 @@ async function buildShareImage(src, title, note, items, fmt) {
 
   g.fillStyle = '#F1F5FB'; g.font = '700 36px Syne, sans-serif';
   g.fillText(title, PAD, 66);
-  g.fillStyle = '#8FA5D4'; g.font = '600 15px Syne, sans-serif';
-  g.fillText(note, PAD, 96);
+  // note: plain string, or [{t, c}] segments for per-word coloring
+  if (Array.isArray(note)) {
+    let nx = PAD;
+    for (const seg of note) {
+      g.font = (seg.c ? '700' : '600') + ' 15px Syne, sans-serif';
+      g.fillStyle = seg.c || '#8FA5D4';
+      g.fillText(seg.t, nx, 96);
+      nx += g.measureText(seg.t).width;
+    }
+  } else {
+    g.fillStyle = '#8FA5D4'; g.font = '600 15px Syne, sans-serif';
+    g.fillText(note, PAD, 96);
+  }
   if (logo) {
     // DFDV mark top-right, optically aligned with the title line
     const lh = 24, lw = lh * logo.width / logo.height;
@@ -867,7 +888,7 @@ async function downloadPriceImage() {
   let note = `${rangeLabel} · ${state.scale === 'logarithmic' ? 'log' : 'linear'} scale`;
   let items = [{ label: 'SOL', color: [CANDLE_UP, CANDLE_DOWN], val: last.y }];
   if (state.rainbow) {
-    note += ` · rainbow bands · zone: ${zoneFor(last.x, last.y)}`;
+    note = [{ t: note + ' · rainbow bands · zone: ' }].concat(zoneParts(last.x, last.y));
     items = items.concat(RB.KEYS.map(k => ({
       label: RB.NAMES[String(k)], color: RB.COLORS[String(k)], val: bandAt(last.x, k) })));
   }
