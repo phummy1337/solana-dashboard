@@ -104,7 +104,13 @@
 
   /* Side-by-side: activity tiles left, price chart right. The chart column
      flexes so the canvas grows to match the tile column's height. */
-  .split { display: grid; grid-template-columns: minmax(340px, 4fr) 8fr; gap: 0 28px; padding: 0 48px; }
+  .split { display: grid; grid-template-columns: minmax(310px, 3.5fr) 8.5fr; gap: 0 28px; padding: 0 48px; }
+  /* Compact snapshot tiles so the chart column dominates */
+  .split .tiles { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; }
+  .split .tile { padding: 10px 12px; }
+  .split .tile .k { font-size: 10px; }
+  .split .tile .v { font-size: 17px; }
+  .split .tile .s { font-size: 11px; margin-top: 2px; }
   .split-left, .split-right { min-width: 0; }
   .split .shead, .split .tiles, .split .controls, .split .stage { padding-left: 0; padding-right: 0; }
   /* Narrow columns: let the "as of" stamp wrap below instead of overflowing */
@@ -320,20 +326,9 @@
 </div>
 
 <!-- ------------------------------------------------------- activity trend -->
-<div class="shead" style="flex-wrap:wrap; row-gap:8px">
+<div class="shead">
   <h2>Cross-Chain Trends</h2>
-  <span class="trend-ctl" id="trendCtl">
-    <button class="tgl" data-trange="1d">1D</button>
-    <button class="tgl" data-trange="1w">1W</button>
-    <button class="tgl" data-trange="1m">1M</button>
-    <button class="tgl" data-trange="3m" aria-pressed="true">3M</button>
-    <button class="tgl" data-trange="6m">6M</button>
-    <button class="tgl" data-trange="1y">1Y</button>
-    <button class="tgl" data-trange="ytd">YTD</button>
-    <button class="tgl" data-trange="2y">2Y</button>
-    <button class="tgl" data-trange="5y">5Y</button>
-  </span>
-  <span class="rule"></span><span class="asof">daily · Blockworks</span>
+  <span class="rule"></span>
 </div>
 <section class="grid" id="trendGrid"></section>
 
@@ -1110,10 +1105,16 @@ function drawPrice() {
   priceDs.data = cands.map(c => ({ x: c.x, y: c.c }));
   priceDs.order = 10;                       // higher order draws later — price stays on top
   const sets = [priceDs];
-  if (state.rainbow) {
+  if (state.rainbow && cands.length) {
+    // Project the bands ~3 months past the last candle so it isn't pinned
+    // to the right edge (solanarainbow does the same with its projection).
+    const bandXs = cands.map(c => c.x);
+    const lastT = Date.parse(cands[cands.length - 1].x + 'T00:00:00Z');
+    for (let i = 1; i <= 13; i++)
+      bandXs.push(new Date(lastT + i * 7 * 86400000).toISOString().slice(0, 10));
     for (const k of RB.KEYS) sets.push({
       label: RB.NAMES[String(k)],
-      data: cands.map(c => ({ x: c.x, y: bandAt(c.x, k) })),
+      data: bandXs.map(x => ({ x, y: bandAt(x, k) })),
       borderColor: RB.COLORS[String(k)], borderWidth: 1.4,
       pointRadius: 0, pointHoverRadius: 0, tension: 0, fill: false, order: 1,
     });
@@ -1279,12 +1280,6 @@ document.querySelectorAll('[data-scale]').forEach(b => b.addEventListener('click
   document.querySelectorAll('[data-scale]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
   state.scale = b.dataset.scale;
   drawPrice();
-}));
-/* Header control applies one range to every card; per-card buttons override. */
-document.querySelectorAll('[data-trange]').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('[data-trange]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
-  for (const t of TRENDS) state.trendRanges[t.key] = b.dataset.trange;
-  buildTrends();
 }));
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
