@@ -125,6 +125,21 @@
     .split { grid-template-columns: 1fr; }
     .split-right .stage .wrap { flex: none; height: 44vh; min-height: 320px; max-height: 460px; }
   }
+  /* Full-screen price chart: same navy ground, chart fills the display */
+  .split-right:fullscreen, .split-right:-webkit-full-screen {
+    background: linear-gradient(180deg, #0A1633 0%, #060E26 60%, #030815 100%);
+    padding: 26px 48px 34px; overflow: auto;
+  }
+  .split-right:fullscreen .stage .wrap, .split-right:-webkit-full-screen .stage .wrap {
+    flex: 1; height: auto; max-height: none; min-height: 0;
+  }
+  /* CSS overlay fallback for browsers that refuse element fullscreen (iOS) */
+  .split-right.fs-fallback {
+    position: fixed; inset: 0; z-index: 1000;
+    background: linear-gradient(180deg, #0A1633 0%, #060E26 60%, #030815 100%);
+    padding: 26px 48px 34px; overflow: auto;
+  }
+  .split-right.fs-fallback .stage .wrap { flex: 1; height: auto; max-height: none; min-height: 0; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; padding: 14px 48px 0; }
   .panel.wide { grid-column: 1 / -1; }
@@ -279,7 +294,9 @@
     <section class="tiles" id="activityTiles"></section>
   </div>
   <div class="split-right">
-    <div class="shead"><h2>SOL Price History</h2><span class="rule"></span></div>
+    <div class="shead"><h2>SOL Price History</h2><span class="rule"></span>
+      <button class="tgl" id="priceDl" title="Download this chart as PNG">⤓ PNG</button>
+      <button class="tgl" id="priceFs" title="View full screen">⛶ Full screen</button></div>
     <div class="controls">
       <span class="ctl-label">Range</span>
       <button class="tgl" data-range="90"   aria-pressed="false">3M</button>
@@ -681,29 +698,13 @@ function dfdvLogo() {
   return _dfdvImg;
 }
 
-/* Renders the card as a branded share image: whatever the chart currently
-   shows (range, scale, smooth, variant), plus the DFDV mark and a CTA. */
-async function buildTrendImage(key, title, fmt, el) {
-  const chart = trendCharts[key];
-  if (!chart) return null;
+/* Shared renderer for branded share images: title, note, chart, legend,
+   DFDV mark top-right, State of Solana + CTA footer. */
+async function buildShareImage(src, title, note, items, fmt) {
   const logo = await dfdvLogo();
   const S = 2, W = 1200, PAD = 48;
-  const src = chart.canvas;
   const chartW = W - PAD * 2;
   const chartH = Math.round(chartW * src.height / src.width);
-
-  let items;
-  if (chart.config.type === 'bar') {
-    const ds = chart.data.datasets[0];
-    items = chart.data.labels.map((l, i) => ({
-      label: l, color: Array.isArray(ds.borderColor) ? ds.borderColor[i] : ds.borderColor,
-      val: ds.data[i] }));
-  } else {
-    items = chart.data.datasets.map(d => ({
-      label: d.label, color: d.borderColor, val: d.data[d.data.length - 1]?.y }));
-  }
-
-  const note = el.querySelector('.note').textContent.trim();
 
   // pre-measure legend wrapping
   const probe = document.createElement('canvas').getContext('2d');
@@ -760,16 +761,53 @@ async function buildTrendImage(key, title, fmt, el) {
   return cv;
 }
 
-async function downloadTrendImage(key, title, fmt, el, range) {
-  const cv = await buildTrendImage(key, title, fmt, el);
-  if (!cv) return;
+function saveCanvas(cv, name) {
   cv.toBlob(b => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(b);
-    a.download = `state-of-solana-${key.replace(/_/g, '-')}-${range}.png`;
+    a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }, 'image/png');
+}
+
+async function buildTrendImage(key, title, fmt, el) {
+  const chart = trendCharts[key];
+  if (!chart) return null;
+  let items;
+  if (chart.config.type === 'bar') {
+    const ds = chart.data.datasets[0];
+    items = chart.data.labels.map((l, i) => ({
+      label: l, color: Array.isArray(ds.borderColor) ? ds.borderColor[i] : ds.borderColor,
+      val: ds.data[i] }));
+  } else {
+    items = chart.data.datasets.map(d => ({
+      label: d.label, color: d.borderColor, val: d.data[d.data.length - 1]?.y }));
+  }
+  const note = el.querySelector('.note').textContent.trim();
+  return buildShareImage(chart.canvas, title, note, items, fmt);
+}
+
+async function downloadTrendImage(key, title, fmt, el, range) {
+  const cv = await buildTrendImage(key, title, fmt, el);
+  if (cv) saveCanvas(cv, `state-of-solana-${key.replace(/_/g, '-')}-${range}.png`);
+}
+
+/* Price chart export: reflects range, scale and the rainbow overlay. */
+async function downloadPriceImage() {
+  const last = state.priceSeries[state.priceSeries.length - 1];
+  if (!last) return;
+  const rangeLabel = [...document.querySelectorAll('[data-range]')]
+    .find(b => b.getAttribute('aria-pressed') === 'true')?.textContent || '';
+  let note = `${rangeLabel} · ${state.scale === 'logarithmic' ? 'log' : 'linear'} scale`;
+  let items = [{ label: 'SOL', color: '#F97316', val: last.y }];
+  if (state.rainbow) {
+    note += ` · rainbow bands · zone: ${zoneFor(last.x, last.y)}`;
+    items = items.concat(RB.KEYS.map(k => ({
+      label: RB.NAMES[String(k)], color: RB.COLORS[String(k)], val: bandAt(last.x, k) })));
+  }
+  const cv = await buildShareImage(priceChart.canvas, 'SOL Price History', note, items, price);
+  if (cv) saveCanvas(cv, `state-of-solana-sol-price-${state.range}.png`);
 }
 
 /* One card, at its own range; re-made in place when its range buttons change. */
@@ -1199,6 +1237,32 @@ function setScale(scale) {
   document.querySelectorAll('[data-scale]').forEach(o =>
     o.setAttribute('aria-pressed', String(o.dataset.scale === scale)));
 }
+$('priceDl').addEventListener('click', downloadPriceImage);
+function syncFsUi() {
+  const active = !!document.fullscreenElement
+    || document.querySelector('.split-right').classList.contains('fs-fallback');
+  $('priceFs').textContent = active ? '✕ Exit full screen' : '⛶ Full screen';
+  setTimeout(() => priceChart.resize(), 80);
+}
+$('priceFs').addEventListener('click', async () => {
+  const el = document.querySelector('.split-right');
+  if (document.fullscreenElement) { document.exitFullscreen(); return; }
+  if (el.classList.contains('fs-fallback')) { el.classList.remove('fs-fallback'); syncFsUi(); return; }
+  try {
+    await (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+  } catch {
+    // No element-fullscreen (iOS Safari, restrictive contexts) — CSS overlay.
+    el.classList.add('fs-fallback');
+    syncFsUi();
+  }
+});
+document.addEventListener('fullscreenchange', syncFsUi);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const el = document.querySelector('.split-right');
+    if (el.classList.contains('fs-fallback')) { el.classList.remove('fs-fallback'); syncFsUi(); }
+  }
+});
 $('rainbowBtn').addEventListener('click', () => {
   state.rainbow = !state.rainbow;
   $('rainbowBtn').setAttribute('aria-pressed', String(state.rainbow));
