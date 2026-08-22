@@ -112,7 +112,10 @@
   .split .shead .asof { white-space: normal; }
   .split-right { display: flex; flex-direction: column; }
   .split-right .stage { flex: 1; display: flex; flex-direction: column; }
-  .split-right .stage .wrap { flex: 1; height: auto; min-height: 360px; max-height: none; }
+  /* solanarainbow-style 2:1 frame */
+  .split-right .stage .wrap { flex: none; height: auto; aspect-ratio: 2 / 1; min-height: 320px; max-height: none; }
+  .leg .sw.candle { width: 13px; height: 13px; border-radius: 3px;
+                    background: linear-gradient(135deg, #90A2DC 50%, #FF7117 50%); }
   /* Keep the chart controls on one line in the narrower split column: tighter
      buttons, no RANGE/SCALE labels (the buttons speak for themselves). */
   @media (min-width: 1181px) {
@@ -123,7 +126,7 @@
   }
   @media (max-width: 1180px) {
     .split { grid-template-columns: 1fr; }
-    .split-right .stage .wrap { flex: none; height: 44vh; min-height: 320px; max-height: 460px; }
+    .split-right .stage .wrap { aspect-ratio: 2 / 1; height: auto; min-height: 280px; max-height: none; }
   }
   /* Expanded price chart: centered popup over a dimmed backdrop */
   #fsBackdrop { display: none; position: fixed; inset: 0; z-index: 999;
@@ -135,7 +138,8 @@
     padding: 22px 34px 30px; overflow: auto;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
   }
-  .split-right.fs-popup .stage .wrap { flex: 1; height: auto; max-height: none; min-height: 0; }
+  .split-right.fs-popup .stage .wrap { flex: none; aspect-ratio: 2 / 1; height: auto; min-height: 0;
+    width: min(100%, calc((92vh - 250px) * 2)); margin: 0 auto; }
   @media (max-width: 760px) { .split-right.fs-popup { inset: 2vh 2vw; padding: 16px 16px 20px; } }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; padding: 14px 48px 0; }
@@ -557,18 +561,62 @@ const tooltipCfg = {
   titleFont: { family: 'Syne', weight: '700', size: 14 }, bodyFont: { size: 13 },
 };
 
+/* Weekly OHLC candles synthesized from daily closes (Blockworks carries no
+   intraday history, so wicks span the week's daily closes). Up/down colors
+   match solanarainbow.com. */
+const CANDLE_UP = '#90A2DC', CANDLE_DOWN = '#FF7117';
+function weeklyCandles(pts) {
+  const out = [];
+  let cur = null;
+  for (const p of pts) {
+    const d = new Date(p.x + 'T00:00:00Z');
+    const monday = new Date(d);
+    monday.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    const key = monday.toISOString().slice(0, 10);
+    if (!cur || cur.key !== key) {
+      cur = { key, x: p.x, o: p.y, h: p.y, l: p.y, c: p.y };
+      out.push(cur);
+    } else {
+      cur.h = Math.max(cur.h, p.y); cur.l = Math.min(cur.l, p.y);
+      cur.c = p.y; cur.x = p.x;
+    }
+  }
+  return out;
+}
+const candlePlugin = {
+  id: 'candles',
+  afterDatasetsDraw(chart) {
+    const cands = chart.$candles;
+    if (!cands?.length) return;
+    const { ctx, scales: { x, y } } = chart;
+    const t0 = Date.parse(cands[0].x), t1 = Date.parse(cands[cands.length - 1].x);
+    const slot = cands.length > 1
+      ? Math.abs(x.getPixelForValue(t1) - x.getPixelForValue(t0)) / (cands.length - 1) : 20;
+    const bw = Math.max(1.6, Math.min(16, slot * 0.62));
+    ctx.save();
+    for (const cd of cands) {
+      const px = x.getPixelForValue(Date.parse(cd.x + 'T00:00:00Z'));
+      if (px < x.left - 10 || px > x.right + 10) continue;
+      const col = cd.c >= cd.o ? CANDLE_UP : CANDLE_DOWN;
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px, y.getPixelForValue(cd.h));
+      ctx.lineTo(px, y.getPixelForValue(cd.l));
+      ctx.stroke();
+      const yo = y.getPixelForValue(cd.o), yc = y.getPixelForValue(cd.c);
+      ctx.fillRect(px - bw / 2, Math.min(yo, yc), bw, Math.max(1, Math.abs(yo - yc)));
+    }
+    ctx.restore();
+  },
+};
+
 const priceChart = new Chart($('priceChart'), {
   type: 'line',
+  plugins: [candlePlugin],
   data: { datasets: [{
-    label: 'SOL', data: [], borderColor: '#F97316', borderWidth: 2,
+    label: 'SOL', data: [], borderWidth: 0, showLine: false,
     pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: '#F97316',
-    tension: 0.05, fill: true,
-    backgroundColor: ctx => {
-      const { chart } = ctx; if (!chart.chartArea) return 'transparent';
-      const g = chart.ctx.createLinearGradient(0, chart.chartArea.top, 0, chart.chartArea.bottom);
-      g.addColorStop(0, 'rgba(249,115,22,0.30)'); g.addColorStop(1, 'rgba(249,115,22,0)');
-      return g;
-    },
+    backgroundColor: 'transparent',
   }] },
   options: {
     responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
@@ -585,7 +633,12 @@ const priceChart = new Chart($('priceChart'), {
                  // line only, plus the rainbow zone as a footer when it's on.
                  filter: item => item.dataset.label === 'SOL',
                  callbacks: {
-                   label: c => 'SOL  ' + price(c.parsed.y),
+                   label: c => {
+                     const cd = priceChart.$candleMap?.[c.raw.x];
+                     if (!cd) return 'SOL  ' + price(c.parsed.y);
+                     return [`O ${price(cd.o)}   H ${price(cd.h)}`,
+                             `L ${price(cd.l)}   C ${price(cd.c)}`];
+                   },
                    afterBody: items => {
                      if (!state.rainbow || !items.length) return '';
                      const p = items[0].raw;
@@ -1050,13 +1103,16 @@ function drawPrice() {
     const cutoff = new Date(Date.now() - Number(state.range) * 86400000).toISOString().slice(0, 10);
     pts = pts.filter(p => p.x >= cutoff);
   }
-  priceDs.data = pts;
+  const cands = weeklyCandles(pts);
+  priceChart.$candles = cands;
+  priceChart.$candleMap = Object.fromEntries(cands.map(c => [c.x, c]));
+  priceDs.data = cands.map(c => ({ x: c.x, y: c.c }));
   priceDs.order = 10;                       // higher order draws later — price stays on top
   const sets = [priceDs];
   if (state.rainbow) {
     for (const k of RB.KEYS) sets.push({
       label: RB.NAMES[String(k)],
-      data: pts.map(p => ({ x: p.x, y: bandAt(p.x, k) })),
+      data: cands.map(c => ({ x: c.x, y: bandAt(c.x, k) })),
       borderColor: RB.COLORS[String(k)], borderWidth: 1.4,
       pointRadius: 0, pointHoverRadius: 0, tension: 0, fill: false, order: 1,
     });
@@ -1066,13 +1122,16 @@ function drawPrice() {
   priceChart.options.scales.x.time.unit = pts.length > 400 ? 'year' : pts.length > 120 ? 'month' : 'week';
   priceChart.update();
 
+  // Legend always rebuilds: band chips carry the band's current dollar level.
   const leg = $('rbLegend');
-  leg.style.display = state.rainbow ? 'flex' : 'none';
-  if (state.rainbow && !leg.childElementCount) {
-    leg.innerHTML = RB.KEYS.map(k =>
-      `<span class="leg"><span class="sw" style="background:${RB.COLORS[String(k)]}"></span>${RB.NAMES[String(k)]}</span>`
-    ).join('');
-  }
+  leg.style.display = 'flex';
+  const today = state.priceSeries[state.priceSeries.length - 1]?.x;
+  const bandChips = state.rainbow && today ? RB.KEYS.map(k =>
+    `<span class="leg"><span class="sw" style="background:${RB.COLORS[String(k)]}"></span>` +
+    `${RB.NAMES[String(k)]} <span class="v num">($${bandAt(today, k).toFixed(1)})</span></span>`
+  ).join('') : '';
+  leg.innerHTML =
+    `<span class="leg"><span class="sw candle"></span>SOL weekly</span>` + bandChips;
 }
 
 /* ------------------------------------------------------------ live network */
