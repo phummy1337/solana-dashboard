@@ -407,7 +407,7 @@
     <div class="rows">
       <div class="row"><span>Est. staking yield</span><b class="num" id="yieldEst">—</b></div>
       <div class="row"><span>Inflation rate</span><b class="num" id="inflation">—</b></div>
-      <div class="row"><span>Nakamoto coefficient<span class="uinfo" tabindex="0" role="button" aria-label="What is the Nakamoto coefficient?">?<span class="tipbox"><b>In simple terms:</b> the smallest number of validators that together control more than a third of all staked SOL — enough to halt the network if they ever colluded or failed at once. <b>Why it matters:</b> it is a decentralization score. The higher the number, the more independent parties an attacker would need to compromise; a low number means power is concentrated in a few hands.</span></span></span><b class="num" id="nakamoto">—</b></div>
+      <div class="row"><span>Nakamoto coefficient<span class="uinfo" tabindex="0" role="button" aria-label="What is the Nakamoto coefficient?">?<span class="tipbox"><b>In simple terms:</b> the smallest number of validators that together control more than a third of all staked SOL — enough to halt the network if they ever colluded or failed at once.<br><br><b>Why it matters:</b> it is a decentralization score. The higher the number, the more independent parties an attacker would need to compromise; a low number means power is concentrated in a few hands.</span></span></span><b class="num" id="nakamoto">—</b></div>
       <div class="row"><span>Client version</span><b class="num" id="version">—</b></div>
     </div>
   </div>
@@ -721,7 +721,7 @@ const TRENDS = [
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',                color: '#4ADE80', fmt: usd },
   { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd },
   { key: 'fsr_card', title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact,
-    tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are. <b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD. <b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.',
+    tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are.<br><br><b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD.<br><br><b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.',
     variants: [
       { id: 'fsr', label: 'FSR',        compare: 'fsr',        fmt: compact },
       { id: 'fee', label: 'Median Fee', compare: 'fee_median', fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)) },
@@ -1457,23 +1457,23 @@ function renderYield(y) {
 // "what does this mean and why should I care" layer.
 const UPGRADES = [
   { name: 'Alpenglow', status: 'dev', desc: 'Next-generation consensus protocol targeting 150 ms finality.',
-    tip: '<b>In simple terms:</b> a rebuild of how validators agree on new blocks. Today a transaction is fully final in about 12 seconds; Alpenglow targets 150 milliseconds. <b>Why it matters:</b> payments and trades would confirm about as fast as a card swipe, closing the gap with centralized exchanges.' },
+    tip: '<b>In simple terms:</b> a rebuild of how validators agree on new blocks. Today a transaction is fully final in about 12 seconds; Alpenglow targets 150 milliseconds.<br><br><b>Why it matters:</b> payments and trades would confirm about as fast as a card swipe, closing the gap with centralized exchanges.' },
   { name: 'Reduced Slot Times', status: 'pending', desc: 'Cuts block time from 400 ms to 200 ms.',
-    tip: '<b>In simple terms:</b> the network produces blocks twice as often. <b>Why it matters:</b> confirmations land roughly twice as fast and the chain can process more per second — apps feel snappier without any code changes.' },
+    tip: '<b>In simple terms:</b> the network produces blocks twice as often.<br><br><b>Why it matters:</b> confirmations land roughly twice as fast and the chain can process more per second — apps feel snappier without any code changes.' },
   { name: 'Reduced Rent', status: 'pending', desc: 'Cuts on-chain storage deposits by 90%, phased in over time.',
-    tip: '<b>In simple terms:</b> storing data on Solana requires a refundable deposit ("rent"); this cuts it by about 90%. <b>Why it matters:</b> creating accounts, tokens and app data gets much cheaper, lowering the cost of onboarding users at scale.' },
+    tip: '<b>In simple terms:</b> storing data on Solana requires a refundable deposit ("rent"); this cuts it by about 90%.<br><br><b>Why it matters:</b> creating accounts, tokens and app data gets much cheaper, lowering the cost of onboarding users at scale.' },
   { name: 'Larger Transaction Sizes', status: 'pending', desc: 'Raises the max transaction size from 1,232 to 4,096 bytes.',
-    tip: '<b>In simple terms:</b> each transaction can carry roughly three times more instructions and data. <b>Why it matters:</b> complex actions — multi-hop swaps, batched DeFi operations — fit in a single transaction instead of being split apart or failing.' },
+    tip: '<b>In simple terms:</b> each transaction can carry roughly three times more instructions and data.<br><br><b>Why it matters:</b> complex actions — multi-hop swaps, batched DeFi operations — fit in a single transaction instead of being split apart or failing.' },
   { name: '100M CU Blocks', status: 'live', desc: 'Raises block capacity from 60M to 100M compute units (+66%).',
-    tip: '<b>In simple terms:</b> each block can hold two-thirds more computation. <b>Why it matters:</b> more transactions land per block during busy periods, which means less congestion and steadier fees.' },
+    tip: '<b>In simple terms:</b> each block can hold two-thirds more computation.<br><br><b>Why it matters:</b> more transactions land per block during busy periods, which means less congestion and steadier fees.' },
   { name: 'Optimized Token Program', status: 'live', desc: 'Token operations use up to 98% less compute.',
-    tip: '<b>In simple terms:</b> the code behind token transfers was rewritten to be drastically cheaper for the network to run. <b>Why it matters:</b> the most common operation on Solana now takes a sliver of the block space it used to, freeing capacity for everything else.' },
+    tip: '<b>In simple terms:</b> the code behind token transfers was rewritten to be drastically cheaper for the network to run.<br><br><b>Why it matters:</b> the most common operation on Solana now takes a sliver of the block space it used to, freeing capacity for everything else.' },
   { name: 'XDP on Solana', status: 'live', desc: 'Kernel-bypass networking for faster block propagation.',
-    tip: '<b>In simple terms:</b> validators send and receive block data straight from the network card, skipping slow operating-system layers. <b>Why it matters:</b> blocks spread through the network faster, keeping slot times steady and forks rarer.' },
+    tip: '<b>In simple terms:</b> validators send and receive block data straight from the network card, skipping slow operating-system layers.<br><br><b>Why it matters:</b> blocks spread through the network faster, keeping slot times steady and forks rarer.' },
   { name: 'BLS Pubkey & Validator Admission Ticket', status: 'live', desc: 'Validators register BLS keys to keep participating in consensus.',
-    tip: '<b>In simple terms:</b> validators register a new type of cryptographic key that lets thousands of votes be checked as one. <b>Why it matters:</b> it is the groundwork for Alpenglow — fast finality needs vote aggregation, and this gets every validator ready for it.' },
+    tip: '<b>In simple terms:</b> validators register a new type of cryptographic key that lets thousands of votes be checked as one.<br><br><b>Why it matters:</b> it is the groundwork for Alpenglow — fast finality needs vote aggregation, and this gets every validator ready for it.' },
   { name: 'New Cryptography Schemes', status: 'dev', desc: 'Native BN254 G2 and BLS12-381 curve operations.',
-    tip: '<b>In simple terms:</b> the math used by zero-knowledge proofs gets built into the network itself instead of being computed the slow way. <b>Why it matters:</b> privacy features, ZK bridges and rollup-style apps become far cheaper and more practical on Solana.' },
+    tip: '<b>In simple terms:</b> the math used by zero-knowledge proofs gets built into the network itself instead of being computed the slow way.<br><br><b>Why it matters:</b> privacy features, ZK bridges and rollup-style apps become far cheaper and more practical on Solana.' },
 ];
 const U_STATUS = { live: 'Live on Mainnet', pending: 'Pending Activation', dev: 'In Development' };
 
