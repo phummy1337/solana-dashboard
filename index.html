@@ -440,7 +440,7 @@
 
 <footer>
   <span class="fn">Year-to-date figures cover 1 January to the latest complete day and are not annualised. Revenue is Blockworks&rsquo; Network REV (priority fees, base fees and Jito tips), reported in SOL and converted at each day&rsquo;s close.</span>
-  <span class="fn">Average transaction fee is total fees divided by total transactions, not a mean of daily averages. Average TPS includes vote transactions. Estimated staking yield assumes inflation accrues to stake and excludes MEV and validator commission.</span>
+  <span class="fn">Average transaction fee is total fees divided by total transactions, not a mean of daily averages. Transaction counts and average TPS cover non-vote (user) transactions, per Blockworks. Estimated staking yield assumes inflation accrues to stake and excludes MEV and validator commission.</span>
   <span class="fn"><b>Sources:</b> market, network and fee data via the
     <a href="https://docs.blockworksresearch.com/" target="_blank" rel="noopener">Blockworks API</a> ·
     chain TVL, yields and platform links via <a href="https://defillama.com/" target="_blank" rel="noopener">DefiLlama</a> ·
@@ -1114,7 +1114,7 @@ function renderTiles() {
   const tradedYtd = s.ytd_dex_volume != null && s.ytd_perps_volume != null
     ? s.ytd_dex_volume + s.ytd_perps_volume : null;
   const T = mode === 'daily' ? [
-    ['Avg. TPS', nf(dm.tps), 'incl. vote transactions'],
+    ['Avg. TPS', nf(dm.tps), 'non-vote transactions'],
     ['Transactions', compact(dm.transactions), ''],
     ['Avg. Transaction Fee', dm.fee_avg != null ? '$' + dm.fee_avg.toFixed(4) : '—',
       dm.fees_usd ? usd(dm.fees_usd) + ' total' : ''],
@@ -1128,7 +1128,7 @@ function renderTiles() {
     ['Total Trading Volume', usd(tradedDaily), 'spot + perps'],
     ['Perps Volume', usd(dm.perps_volume), 'futures notional'],
   ] : [
-    [`Avg. TPS ${yr}`, nf(s.avg_tps_ytd), 'incl. vote transactions'],
+    [`Avg. TPS ${yr}`, nf(s.avg_tps_ytd), 'non-vote transactions'],
     ['YTD Transactions', compact(s.ytd_transactions), ytdAvgTx ? compact(ytdAvgTx) + ' per day' : ''],
     ['Avg. Transaction Fee YTD', s.avg_fee_ytd != null ? '$' + s.avg_fee_ytd.toFixed(4) : '—',
       s.ytd_fees_usd ? usd(s.ytd_fees_usd) + ' total' : ''],
