@@ -199,6 +199,10 @@
   select.rsel:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
   select.rsel option { background: #0D1A34; color: var(--ink); }
   .leg .v { color: var(--mute); margin-left: 2px; }
+  .legend button.leg { background: none; border: none; padding: 0; cursor: pointer;
+                       font: inherit; color: #D3DBEA; }
+  .legend button.leg:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; border-radius: 4px; }
+  .leg[aria-pressed="false"] { opacity: 0.35; }
 
   .ytable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .ytable th { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
@@ -542,7 +546,7 @@ const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
                 rainbow: true, preRainbowScale: 'linear',
                 trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
-                trendSeries: {}, trendCompare: {} };
+                trendHidden: {}, trendSeries: {}, trendCompare: {} };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -884,7 +888,7 @@ async function buildTrendImage(key, title, fmt, el) {
       label: l, color: Array.isArray(ds.borderColor) ? ds.borderColor[i] : ds.borderColor,
       val: ds.data[i] }));
   } else {
-    items = chart.data.datasets.map(d => ({
+    items = chart.data.datasets.filter(d => !d.hidden).map(d => ({
       label: d.label, color: d.borderColor, val: d.data[d.data.length - 1]?.y }));
   }
   const note = el.querySelector('.note').textContent.trim();
@@ -1021,6 +1025,7 @@ function makeTrendCard(t) {
     const unit = spanDays > 720 ? 'year' : spanDays > 120 ? 'month' : 'day';
 
     const prep = pts => clip(smooth ? ma7(pts) : pts);
+    const hiddenSet = state.trendHidden[orig.key] || new Set();
     let datasets;
     if (cmp) {
       datasets = CHAINS.filter(c => cmp[c.key]).map(c => ({
@@ -1028,10 +1033,19 @@ function makeTrendCard(t) {
         data: prep(cmp[c.key]).filter(p => p.v > 0).map(p => ({ x: p.d, y: p.v })),
         borderColor: c.color, borderWidth: c.width, order: c.key === 'solana' ? 10 : 1,
         pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: false,
+        hidden: hiddenSet.has(c.key),
       })).filter(d => d.data.length);
+      // Clickable chips: toggle a chain's line on/off (dimmed when off).
       el.querySelector('.legend').innerHTML = CHAINS.filter(c => cmp[c.key]).map(c =>
-        `<span class="leg"><span class="sw" style="background:${c.color}"></span>${c.name}
-           <span class="v num">${t.fmt(cmp[c.key][cmp[c.key].length - 1].v)}</span></span>`).join('');
+        `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
+           <span class="sw" style="background:${c.color}"></span>${c.name}
+           <span class="v num">${t.fmt(cmp[c.key][cmp[c.key].length - 1].v)}</span></button>`).join('');
+      el.querySelectorAll('.legend .leg').forEach(b => b.addEventListener('click', () => {
+        const s = state.trendHidden[orig.key] ??= new Set();
+        s.has(b.dataset.chain) ? s.delete(b.dataset.chain) : s.add(b.dataset.chain);
+        const fresh = makeTrendCard(orig);
+        if (fresh) el.replaceWith(fresh);
+      }));
     } else {
       datasets = [{
         label: t.title, data: prep(solPts).map(p => ({ x: p.d, y: p.v })),
