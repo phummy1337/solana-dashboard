@@ -546,7 +546,7 @@ const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
                 rainbow: true, preRainbowScale: 'linear',
                 trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
-                trendHidden: {}, trendSeries: {}, trendCompare: {} };
+                trendHidden: {}, trendAggs: {}, trendSeries: {}, trendCompare: {} };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -719,13 +719,14 @@ const CHAINS = [
   { key: 'polygon',   name: 'Polygon',     color: '#E879F9', width: 1.3 },
 ];
 const TRENDS = [
-  { key: 'ytd_transactions',        compare: 'transactions',      title: 'Daily Transactions',      color: '#38BDF8', fmt: compact },
-  { key: 'ytd_dex_volume',          compare: 'dex_volume',        title: 'Daily Spot DEX Volume',   color: '#14F195', fmt: usd },
-  { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply',       color: '#E9469A', fmt: usd },
-  { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',                color: '#4ADE80', fmt: usd },
-  { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd },
+  { key: 'ytd_transactions',        compare: 'transactions',      title: 'Transactions',      color: '#38BDF8', fmt: compact, agg: 'sum' },
+  { key: 'ytd_dex_volume',          compare: 'dex_volume',        title: 'Spot DEX Volume',   color: '#14F195', fmt: usd, agg: 'sum' },
+  { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply', color: '#E9469A', fmt: usd, agg: 'last' },
+  { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',          color: '#4ADE80', fmt: usd, agg: 'last' },
+  { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd, agg: 'sum' },
   { key: 'fsr_card', title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact,
     tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are.<br><br><b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD.<br><br><b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.',
+    agg: 'mean',
     variants: [
       { id: 'fsr', label: 'FSR',        compare: 'fsr',        fmt: compact },
       { id: 'fee', label: 'Median Fee', compare: 'fee_median', fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)) },
@@ -733,6 +734,30 @@ const TRENDS = [
     ] },
 ];
 const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y'];
+const TREND_AGGS = [['d', 'Daily'], ['w', 'Weekly'], ['m', 'Monthly'], ['q', 'Quarterly'], ['y', 'Yearly']];
+
+/* Re-bucket a daily series. Flow metrics sum per bucket, level metrics keep
+   the period-end value, fee metrics average. Bucket is stamped with its last
+   date so the time axis stays honest about partial current periods. */
+function aggregateSeries(pts, period, mode) {
+  if (period === 'd') return pts;
+  const buckets = new Map();
+  for (const p of pts) {
+    let key;
+    if (period === 'w') {
+      const dt = new Date(p.d + 'T00:00:00Z');
+      dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7));
+      key = dt.toISOString().slice(0, 10);
+    } else if (period === 'm') key = p.d.slice(0, 7);
+    else if (period === 'q') key = p.d.slice(0, 4) + '-Q' + (Math.floor((+p.d.slice(5, 7) - 1) / 3) + 1);
+    else key = p.d.slice(0, 4);
+    let b = buckets.get(key);
+    if (!b) buckets.set(key, b = { d: p.d, sum: 0, n: 0, last: p.v });
+    b.sum += p.v; b.n++; b.last = p.v; b.d = p.d;
+  }
+  return [...buckets.values()].map(b =>
+    ({ d: b.d, v: mode === 'sum' ? b.sum : mode === 'mean' ? b.sum / b.n : b.last }));
+}
 
 function sparkOptions(t, unit, logScale) {
   return {
@@ -952,6 +977,8 @@ function makeTrendCard(t) {
   const scale = state.trendScales[t.key] || (cmp ? 'log' : 'lin');
   const logScale = scale === 'log';
   const smooth = !!state.trendSmooth[t.key] && range !== '1d';
+  const period = range === '1d' ? 'd' : (state.trendAggs[orig.key] || 'd');
+  const aggMode = t.agg || 'sum';
   // Trailing 7-day mean, computed on the full series BEFORE range clipping so
   // the first visible points still average over real history.
   const ma7 = pts => pts.map((p, i) => {
@@ -963,12 +990,17 @@ function makeTrendCard(t) {
   const el = document.createElement('div');
   el.className = 'panel';
   const noteTail = (range === '1d' ? ' · latest complete day' : '')
-                 + (logScale ? ' · log scale' : '') + (smooth ? ' · 7-day average' : '');
+                 + (period !== 'd' ? ' · ' + TREND_AGGS.find(a => a[0] === period)[1].toLowerCase()
+                    + (aggMode === 'sum' ? ' totals' : aggMode === 'mean' ? ' averages' : ', period end') : '')
+                 + (logScale ? ' · log scale' : '')
+                 + (smooth ? (period === 'd' ? ' · 7-day average' : ' · 7-period average') : '');
   el.innerHTML = `<div class="crow"><h3 style="display:flex;align-items:center">${t.title}${t.tip
         ? `<span class="uinfo" tabindex="0" role="button" aria-label="What is this metric?">?<span class="tipbox">${t.tip}</span></span>` : ''}</h3>
       <span class="trend-ctl small">
         <select class="rsel" data-crange-sel aria-label="Time period">${TREND_RANGE_KEYS.map(k =>
           `<option value="${k}"${k === range ? ' selected' : ''}>${k.toUpperCase()}</option>`).join('')}</select>
+        <select class="rsel" data-cagg-sel aria-label="Aggregation">${TREND_AGGS.map(([k, label]) =>
+          `<option value="${k}"${k === period ? ' selected' : ''}>${label}</option>`).join('')}</select>
         <span class="ctl-sep"></span>
         <button class="tgl" data-cscale="lin" aria-pressed="${!logScale}">LIN</button>
         <button class="tgl" data-cscale="log" aria-pressed="${logScale}">LOG</button>
@@ -984,6 +1016,11 @@ function makeTrendCard(t) {
   el.querySelector('[data-crange-sel]').addEventListener('change', e => {
     state.trendRanges[t.key] = e.target.value;
     const fresh = makeTrendCard(t);
+    if (fresh) el.replaceWith(fresh);
+  });
+  el.querySelector('[data-cagg-sel]').addEventListener('change', e => {
+    state.trendAggs[orig.key] = e.target.value;
+    const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   });
   el.querySelectorAll('[data-cscale]').forEach(b => b.addEventListener('click', () => {
@@ -1037,7 +1074,11 @@ function makeTrendCard(t) {
     const spanDays = Math.max(1, (new Date(last.d) - new Date(cutoff)) / 86400000);
     const unit = spanDays > 720 ? 'year' : spanDays > 120 ? 'month' : 'day';
 
-    const prep = pts => clip(smooth ? ma7(pts) : pts);
+    const prep = pts => {
+      let out = aggregateSeries(pts, period, aggMode);
+      if (smooth) out = ma7(out);
+      return clip(out);
+    };
     const hiddenSet = state.trendHidden[orig.key] || new Set();
     let datasets;
     if (cmp) {
@@ -1049,10 +1090,16 @@ function makeTrendCard(t) {
         hidden: hiddenSet.has(c.key),
       })).filter(d => d.data.length);
       // Clickable chips: toggle a chain's line on/off (dimmed when off).
-      el.querySelector('.legend').innerHTML = CHAINS.filter(c => cmp[c.key]).map(c =>
-        `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
+      const lastOf = name => {
+        const ds = datasets.find(d => d.label === name);
+        return ds?.data[ds.data.length - 1]?.y;
+      };
+      el.querySelector('.legend').innerHTML = CHAINS.filter(c => cmp[c.key]).map(c => {
+        const v = lastOf(c.name);
+        return `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
            <span class="sw" style="background:${c.color}"></span>${c.name}
-           <span class="v num">${t.fmt(cmp[c.key][cmp[c.key].length - 1].v)}</span></button>`).join('');
+           <span class="v num">${v != null ? t.fmt(v) : '—'}</span></button>`;
+      }).join('');
       el.querySelectorAll('.legend .leg').forEach(b => b.addEventListener('click', () => {
         const s = state.trendHidden[orig.key] ??= new Set();
         s.has(b.dataset.chain) ? s.delete(b.dataset.chain) : s.add(b.dataset.chain);
