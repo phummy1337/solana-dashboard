@@ -743,7 +743,20 @@ function sparkOptions(t, unit, logScale) {
            border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 34, font: { size: 10 } } },
       y: { type: logScale ? 'logarithmic' : 'linear',
            grid: gridCfg, border: { display: false }, beginAtZero: !logScale,
-           ticks: { maxTicksLimit: 5, font: { size: 10 }, callback: v => t.fmt(v) } },
+           // Log axes over a narrow range produce ugly data-edge ticks
+           // (167M, 169M, ...); snap to round numbers instead.
+           afterBuildTicks(axis) {
+             if (axis.type !== 'logarithmic' || axis.max / axis.min > 12) return;
+             const span = axis.max - axis.min;
+             const raw = span / 4;
+             const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+             const step = mag * (raw / mag >= 5 ? 10 : raw / mag >= 2 ? 5 : raw / mag >= 1 ? 2 : 1);
+             const ticks = [];
+             for (let v = Math.ceil(axis.min / step) * step; v <= axis.max; v += step)
+               ticks.push({ value: v });
+             if (ticks.length >= 2) axis.ticks = ticks;
+           },
+           ticks: { maxTicksLimit: 6, font: { size: 10 }, callback: v => t.fmt(v) } },
     },
     plugins: { legend: { display: false },
                // Colored swatches per row so multi-chain tooltips are scannable.
