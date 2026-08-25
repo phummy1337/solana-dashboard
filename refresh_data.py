@@ -545,7 +545,17 @@ def main() -> int:
             k = (p.get("project"), (p.get("symbol") or "").upper())
             totals[k] = totals.get(k, 0) + (p.get("tvlUsd") or 0)
 
-        # Token logos via CoinGecko search, exact-symbol match only.
+        # Token logos via CoinGecko search, exact-symbol match only. Falls back
+        # to the previous refresh's logo when the search is rate-limited, so a
+        # 429 never blanks icons that were already resolved.
+        prev_logos: dict = {}
+        try:
+            prev = json.loads(OUT.read_text())["yield_products"]
+            for it in (prev.get("items") or []):
+                if it.get("logo"):
+                    prev_logos[it["symbol"]] = it["logo"]
+        except Exception:  # noqa: BLE001 - first run or old schema
+            pass
         logo_cache: dict = {}
 
         def logo_for(sym: str):
@@ -559,7 +569,8 @@ def main() -> int:
                         url = c.get("large") or c.get("thumb")
                         break
             except Exception as e:  # noqa: BLE001
-                warn(f"logo search {sym}: {e}")
+                url = prev_logos.get(sym)
+                warn(f"logo search {sym}: {e}" + (" — reusing previous logo" if url else ""))
             logo_cache[sym] = url
             return url
 
@@ -583,6 +594,20 @@ def main() -> int:
                 "url": proto_urls.get("apyx-protocol") or "https://app.apyx.fi",
                 "logo": "https://apyx-token-logos.apxusd-supply-1337.workers.dev/apyusd-256.png",
             }
+            # First-party yield: Apyx's own API is the source of truth for
+            # apyUSD's APY (DefiLlama's independent calc runs ~1pp different
+            # from what apyx.fi displays). DefiLlama stays as fallback.
+            try:
+                aj = get("https://api.apyx.fi/v1/protocol/apyUSD",
+                         {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                        "Chrome/126.0.0.0 Safari/537.36"})["data"]
+                apyusd["apy"] = round(float(aj["apy"]), 2)
+                apyusd["apy30d"] = round(float(aj["apy30d"]), 2)
+                print(f"  apyx first-party APY: {apyusd['apy']}% (30d {apyusd['apy30d']}%)")
+            except Exception as e:  # noqa: BLE001
+                warn(f"apyx protocol api: {e} — using DefiLlama APY")
+
             # Preferred TVL: "Protocol Reserves" from Apyx's Accountable
             # proof-of-solvency feed (total reserves minus protocol-owned
             # liquidity and inventory — matches the figure the page displays).
