@@ -2,12 +2,11 @@ name: Refresh dashboard data
 
 on:
   schedule:
-    # Blockworks publishes the previous UTC day during the UTC morning; ladder
-    # runs through that window so the site refreshes shortly after they land.
+    # Measured from refresh-commit history: Blockworks lands the previous UTC
+    # day anywhere between ~08:00 and ~19:00 UTC. Run every 2h through that
+    # window (max ~2h lag), plus an early pass for prices/yields/reserves.
     # Extra runs are free — the job only commits when data.json changed.
-    - cron: "15 3,5,7,9 * * *"
-    # Evening pass for the live-ish inputs (spot price, reserves, yields).
-    - cron: "20 18 * * *"
+    - cron: "15 4,8,10,12,14,16,18,20 * * *"
   workflow_dispatch:
 
 permissions:
