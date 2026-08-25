@@ -69,6 +69,23 @@
   .num { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
          font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
+  /* headline marquee */
+  .marquee { flex: none; overflow: hidden; background: rgba(13, 26, 52, 0.7); border-bottom: 1px solid var(--line-2); }
+  .marquee-track { display: inline-flex; white-space: nowrap; will-change: transform;
+                   padding: 9px 0; animation: marq var(--dur, 70s) linear infinite; }
+  .marquee:hover .marquee-track { animation-play-state: paused; }
+  @keyframes marq { to { transform: translateX(-50%); } }
+  @media (prefers-reduced-motion: reduce) { .marquee-track { animation: none; } }
+  .mq-item { display: inline-flex; align-items: baseline; gap: 9px; padding: 0 0 0 30px;
+             font-size: 13px; font-weight: 600; }
+  .mq-item::after { content: '•'; margin-left: 30px; color: rgba(143,165,212,0.3); }
+  .mq-src { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--mute); }
+  .mq-item a { color: var(--peri); text-decoration: none; }
+  .mq-item a:hover { color: var(--ink); }
+  .mq-item.mq-promo .mq-src { color: var(--orange); }
+  .mq-item.mq-promo a { color: var(--orange); font-weight: 700; }
+  .mq-item.mq-promo a:hover { color: #FFB16B; }
+
   header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 34px 48px 0; }
   h1 { font-size: clamp(28px, 3.4vw, 50px); font-weight: 700; letter-spacing: -0.01em; line-height: 1.05;
        display: flex; align-items: center; gap: 0.38em; }
@@ -288,6 +305,10 @@
 </style>
 </head>
 <body>
+
+<div class="marquee" aria-label="Trending Solana headlines">
+  <div class="marquee-track" id="marqueeTrack"></div>
+</div>
 
 <header>
   <div>
@@ -1175,6 +1196,7 @@ async function loadData() {
     buildTrends();
     renderYield(d.yield_products);
     renderNews(d.news);
+    renderMarquee(d.news);
 
     if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
     health.data = 'ok';
@@ -1579,6 +1601,39 @@ function renderUpgrades() {
       </div>
       <div class="udesc">${u.desc}</div>
     </div>`).join('');
+}
+
+/* ------------------------------------------------------------- marquee */
+const DFDV_PROMO = { s: 'DFDV', t: 'DFDV = The Best Way To Get Levered SOL Exposure',
+                     u: 'https://defidevcorp.beehiiv.com/p/the-sol-boost' };
+function renderMarquee(items) {
+  const track = $('marqueeTrack');
+  track.textContent = '';
+  const seq = [];
+  (items || []).slice(0, 10).forEach((n, i) => {
+    seq.push([n, false]);
+    if (i === 2) seq.push([DFDV_PROMO, true]);   // sneak the promo in early
+  });
+  if (!seq.length) seq.push([DFDV_PROMO, true]);
+  if (!seq.some(([, p]) => p)) seq.push([DFDV_PROMO, true]);
+  // two copies so the -50% translate loops seamlessly
+  for (let c = 0; c < 2; c++) for (const [n, promo] of seq) {
+    if (!/^https?:\/\//.test(n.u)) continue;
+    const item = document.createElement('span');
+    item.className = 'mq-item' + (promo ? ' mq-promo' : '');
+    const src = document.createElement('span');
+    src.className = 'mq-src';
+    src.textContent = n.s;
+    const a = document.createElement('a');
+    a.href = n.u; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = n.t;
+    item.append(src, a);
+    track.appendChild(item);
+  }
+  requestAnimationFrame(() => {
+    const half = track.scrollWidth / 2;
+    track.style.setProperty('--dur', Math.max(35, Math.round(half / 55)) + 's');
+  });
 }
 
 /* ------------------------------------------------------------- news feed */
