@@ -19,7 +19,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 # The python.org macOS builds ship no system roots, so HTTPS fails with
@@ -643,8 +643,8 @@ def main() -> int:
     # arrive pre-filtered; general feeds pass a Solana-ecosystem keyword gate.
     NEWS_FEEDS = [
         ("Cointelegraph", "https://cointelegraph.com/rss/tag/solana", False),
-        ("CryptoSlate", "https://cryptoslate.com/news/solana/feed/", False),
         ("Decrypt", "https://decrypt.co/feed", True),
+        ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/", True),
         ("The Block", "https://www.theblock.co/rss.xml", True),
         ("Blockworks", "https://blockworks.co/feed", True),
     ]
@@ -696,21 +696,48 @@ def main() -> int:
             out = [x for x in out if _news_match(x["t"])]
         return [x for x in out if x["t"] and x["u"].startswith("http")]
 
-    news: list = []
+    by_source: dict[str, list] = {}
     seen_titles: set = set()
+
+    def _collect(source: str, items: list) -> None:
+        for x in items:
+            key = _re.sub(r"\W+", "", x["t"].lower())[:70]
+            if key in seen_titles:
+                continue
+            seen_titles.add(key)
+            by_source.setdefault(source, []).append(x)
+
     for source, url, filtered in NEWS_FEEDS:
         try:
-            for x in _feed_items(source, url, filtered):
-                key = _re.sub(r"\W+", "", x["t"].lower())[:70]
-                if key in seen_titles:
-                    continue
-                seen_titles.add(key)
-                news.append(x)
+            _collect(source, _feed_items(source, url, filtered))
         except Exception as e:  # noqa: BLE001
             warn(f"news feed {source}: {e}")
+
+    # SolanaFloor has no RSS, but its Directus CMS is publicly readable.
+    try:
+        sf = get("https://cms.solanafloor.com/items/articles"
+                 "?limit=12&sort=-date_created&fields=title,slug,date_created,status",
+                 {"User-Agent": "Mozilla/5.0"})
+        _collect("SolanaFloor", [
+            {"t": a["title"], "u": f"https://solanafloor.com/news/{a['slug']}",
+             "s": "SolanaFloor", "d": a["date_created"][:19] + "+00:00"}
+            for a in sf.get("data", [])
+            if a.get("status") == "published" and a.get("title") and a.get("slug")])
+    except Exception as e:  # noqa: BLE001
+        warn(f"news feed SolanaFloor: {e}")
+
+    # Cap each outlet so one prolific source can't crowd out the rest, and
+    # drop anything older than two weeks — "trending" means recent.
+    fresh_cutoff = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+    news: list = []
+    for source, items in by_source.items():
+        items = [x for x in items if x["d"] >= fresh_cutoff]
+        items.sort(key=lambda x: x["d"], reverse=True)
+        news.extend(items[:4])
     news.sort(key=lambda x: x["d"], reverse=True)
     data["news"] = news[:14]
-    print(f"  news: {len(news)} matched, keeping {len(data['news'])}")
+    mix = {s: sum(1 for x in data["news"] if x["s"] == s) for s in by_source}
+    print(f"  news: keeping {len(data['news'])} · mix {mix}")
 
     data["compare"] = compare
     data["daily"] = daily
