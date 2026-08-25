@@ -1535,12 +1535,11 @@ function renderYield(y) {
     const a = y.apyusd;
     html += row(a, 'apyx', `<b>${usd(a.tvl_reserves ?? a.tvl_protocol)}</b>`);
   }
-  html += (y.items || []).map(r => row(r, '', `<b>${usd(r.tvl_total ?? r.tvl)}</b>`)).join('');
+  html += (y.items || []).filter(r => (r.apy30d ?? 0) > 2)
+    .map(r => row(r, '', `<b>${usd(r.tvl_total ?? r.tvl)}</b>`)).join('');
   tb.innerHTML = html;
   $('yieldNote').textContent =
-    'apyUSD TVL is Apyx protocol reserves per accountable.apyx.fi (proof of solvency). ' +
-    'Other TVLs are each product’s combined total across chains (DefiLlama). ' +
-    'Products qualify with a Solana market above $10M TVL.';
+    'Yields are 30-day averages — apyUSD via the Apyx API, all other products via DefiLlama.';
 }
 
 /* --------------------------------------------------------- network upgrades */
