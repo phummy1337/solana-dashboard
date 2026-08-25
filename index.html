@@ -241,6 +241,17 @@
   .uinfo .tipbox.flip-left { left: auto; right: 0; transform: none; }
   .uinfo .tipbox.flip-right { left: 0; transform: none; }
 
+  /* news feed */
+  .news-row { display: flex; align-items: baseline; gap: 13px; padding: 10px 0; border-top: 1px solid var(--line-2); }
+  .news-row:first-child { border-top: none; padding-top: 2px; }
+  .news-src { flex: none; width: 108px; font-size: 10px; font-weight: 700; letter-spacing: .07em;
+              text-transform: uppercase; color: var(--mute); }
+  .news-t { flex: 1; font-size: 14.5px; font-weight: 600; min-width: 0; }
+  .news-t a { color: var(--ink); text-decoration: none; }
+  .news-t a:hover { color: var(--orange); }
+  .news-time { flex: none; font-size: 12px; font-weight: 600; color: var(--mute); }
+  @media (max-width: 640px) { .news-src { width: 84px; } .news-time { display: none; } }
+
   .ytable a.plink { color: var(--peri); text-decoration: none; border-bottom: 1px dotted rgba(143,165,212,0.45); }
   .ytable a.plink:hover { color: var(--ink); border-bottom-color: var(--orange); }
   .ytable tr.apyx td { background: rgba(249,115,22,0.07); border-top-color: rgba(249,115,22,0.35); }
@@ -441,6 +452,12 @@
 <div class="shead"><h2>Network Upgrades</h2><span class="rule"></span>
   <span class="asof">per <a href="https://solana.com/upgrades" target="_blank" rel="noopener">solana.com/upgrades</a></span></div>
 <section class="grid" id="upgradeGrid"></section>
+
+<!-- --------------------------------------------------------- trending news -->
+<div class="shead"><h2>Trending on Solana</h2><span class="rule"></span><span class="asof" id="newsAsOf"></span></div>
+<section class="grid">
+  <div class="panel" style="grid-column: 1 / -1;"><div id="newsList"></div></div>
+</section>
 
 <footer>
   <span class="fn">Year-to-date figures cover 1 January to the latest complete day and are not annualised. Revenue is Blockworks&rsquo; Network REV (priority fees, base fees and Jito tips), reported in SOL and converted at each day&rsquo;s close.</span>
@@ -1157,6 +1174,7 @@ async function loadData() {
     state.trendCompare = d.compare || {};
     buildTrends();
     renderYield(d.yield_products);
+    renderNews(d.news);
 
     if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
     health.data = 'ok';
@@ -1562,6 +1580,44 @@ function renderUpgrades() {
       </div>
       <div class="udesc">${u.desc}</div>
     </div>`).join('');
+}
+
+/* ------------------------------------------------------------- news feed */
+function timeAgo(iso) {
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + 'm ago';
+  if (s < 86400) return Math.round(s / 3600) + 'h ago';
+  return Math.round(s / 86400) + 'd ago';
+}
+function renderNews(items) {
+  const list = $('newsList');
+  if (!items?.length) {
+    list.parentElement.parentElement.previousElementSibling.style.display = 'none';
+    list.parentElement.parentElement.style.display = 'none';
+    return;
+  }
+  list.textContent = '';
+  // Feed titles are third-party text — build with textContent, never innerHTML.
+  for (const n of items) {
+    if (!/^https?:\/\//.test(n.u)) continue;
+    const row = document.createElement('div');
+    row.className = 'news-row';
+    const src = document.createElement('span');
+    src.className = 'news-src';
+    src.textContent = n.s;
+    const t = document.createElement('span');
+    t.className = 'news-t';
+    const a = document.createElement('a');
+    a.href = n.u; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = n.t;
+    t.appendChild(a);
+    const when = document.createElement('span');
+    when.className = 'news-time num';
+    when.textContent = timeAgo(n.d);
+    row.append(src, t, when);
+    list.appendChild(row);
+  }
+  $('newsAsOf').textContent = 'refreshed with the data · sources linked';
 }
 
 /* ------------------------------------------------------------ uptime panel */

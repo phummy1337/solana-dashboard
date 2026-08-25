@@ -638,6 +638,80 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         warn(f"yield products: {e}")
 
+    # ------------------------------------------------------- solana news feed
+    # RSS/Atom aggregation, server-side so the page stays keyless. Tag feeds
+    # arrive pre-filtered; general feeds pass a Solana-ecosystem keyword gate.
+    NEWS_FEEDS = [
+        ("Cointelegraph", "https://cointelegraph.com/rss/tag/solana", False),
+        ("CryptoSlate", "https://cryptoslate.com/news/solana/feed/", False),
+        ("Decrypt", "https://decrypt.co/feed", True),
+        ("The Block", "https://www.theblock.co/rss.xml", True),
+        ("Blockworks", "https://blockworks.co/feed", True),
+    ]
+    NEWS_KEYWORDS = ["solana", "jupiter", "jito", "pump.fun", "pumpfun", "firedancer",
+                     "helius", "drift", "kamino", "marinade", "raydium", "phantom",
+                     "anza", "alpenglow", "dfdv", "defi development", "apyx"]
+    import re as _re
+    import email.utils as _eut
+
+    def _news_match(title: str) -> bool:
+        low = title.lower()
+        if any(k in low for k in NEWS_KEYWORDS):
+            return True
+        return bool(_re.search(r"\bSOL\b", title))  # the ticker, case-sensitive
+
+    def _feed_items(source: str, url: str, filtered: bool) -> list[dict]:
+        import xml.etree.ElementTree as ET
+        raw = urllib.request.urlopen(
+            urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml"}),
+            timeout=45, context=_SSL_CTX).read()
+        root = ET.fromstring(raw)
+        out = []
+        ATOM = "{http://www.w3.org/2005/Atom}"
+        for it in root.findall(".//item"):          # RSS
+            title = (it.findtext("title") or "").strip()
+            link = (it.findtext("link") or "").strip()
+            pub = it.findtext("pubDate") or ""
+            try:
+                dt = _eut.parsedate_to_datetime(pub)
+            except Exception:  # noqa: BLE001
+                continue
+            out.append({"t": title, "u": link, "s": source,
+                        "d": dt.astimezone(timezone.utc).isoformat(timespec="seconds")})
+        for it in root.findall(f".//{ATOM}entry"):  # Atom
+            title = (it.findtext(f"{ATOM}title") or "").strip()
+            le = it.find(f"{ATOM}link")
+            link = (le.get("href") if le is not None else "").strip()
+            pub = it.findtext(f"{ATOM}published") or it.findtext(f"{ATOM}updated") or ""
+            try:
+                dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+            except Exception:  # noqa: BLE001
+                continue
+            out.append({"t": title, "u": link, "s": source,
+                        "d": dt.astimezone(timezone.utc).isoformat(timespec="seconds")})
+        if filtered:
+            out = [x for x in out if _news_match(x["t"])]
+        return [x for x in out if x["t"] and x["u"].startswith("http")]
+
+    news: list = []
+    seen_titles: set = set()
+    for source, url, filtered in NEWS_FEEDS:
+        try:
+            for x in _feed_items(source, url, filtered):
+                key = _re.sub(r"\W+", "", x["t"].lower())[:70]
+                if key in seen_titles:
+                    continue
+                seen_titles.add(key)
+                news.append(x)
+        except Exception as e:  # noqa: BLE001
+            warn(f"news feed {source}: {e}")
+    news.sort(key=lambda x: x["d"], reverse=True)
+    data["news"] = news[:14]
+    print(f"  news: {len(news)} matched, keeping {len(data['news'])}")
+
     data["compare"] = compare
     data["daily"] = daily
     data["warnings"] = warnings
