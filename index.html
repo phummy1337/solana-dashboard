@@ -851,6 +851,7 @@ function buildTrends() {
 }
 
 /* ------------------------------------------------------ trend card export */
+const SHARE_W = 1200, SHARE_PAD = 48, SHARE_CHART_W = SHARE_W - SHARE_PAD * 2;
 let _dfdvImg = null;
 function dfdvLogo() {
   _dfdvImg ??= new Promise(res => {
@@ -865,26 +866,30 @@ function dfdvLogo() {
    DFDV mark top-right, State of Solana + CTA footer. */
 async function buildShareImage(src, title, note, items, fmt) {
   const logo = await dfdvLogo();
-  const S = 2, W = 1200, PAD = 48;
-  const chartW = W - PAD * 2;
+  const S = 2, W = SHARE_W, PAD = SHARE_PAD;
+  const chartW = SHARE_CHART_W;
   const chartH = Math.round(chartW * src.height / src.width);
 
-  // pre-measure legend wrapping
+  // pre-measure legend wrapping. Sized to read at a glance once the PNG is
+  // posted or dropped in a deck — the old 13px set the legend well below the
+  // axis labels, which land near 20px after the chart bitmap is scaled up.
+  const LEG_FONT = '700 19px Syne, sans-serif';
+  const LEG_ROW = 36, LEG_SWATCH = 18, LEG_GAP = 24;
   const probe = document.createElement('canvas').getContext('2d');
-  probe.font = '600 13px Syne, sans-serif';
+  probe.font = LEG_FONT;
   let lx = PAD, rows = 1;
   const laid = items.map(it => {
-    const txt = `${it.label}  ${it.val != null ? fmt(it.val) : ''}`;
-    const w = probe.measureText(txt).width + 26;
+    const txt = it.val != null ? `${it.label} (${fmt(it.val)})` : it.label;
+    const w = probe.measureText(txt).width + LEG_SWATCH + 10;
     if (lx + w > W - PAD) { lx = PAD; rows++; }
     const pos = { txt, x: lx, row: rows, color: it.color };
-    lx += w + 18;
+    lx += w + LEG_GAP;
     return pos;
   });
 
   const chartTop = 132;
-  const legendTop = chartTop + chartH + 26;
-  const H = legendTop + rows * 28 + 82;
+  const legendTop = chartTop + chartH + 34;
+  const H = legendTop + rows * LEG_ROW + 82;
   const cv = document.createElement('canvas');
   cv.width = W * S; cv.height = H * S;
   const g = cv.getContext('2d');
@@ -917,29 +922,27 @@ async function buildShareImage(src, title, note, items, fmt) {
 
   g.drawImage(src, PAD, chartTop, chartW, chartH);
 
-  g.font = '600 13px Syne, sans-serif';
+  g.font = LEG_FONT;
   for (const p of laid) {
-    const y = legendTop + (p.row - 1) * 28;
+    const y = legendTop + (p.row - 1) * LEG_ROW;
     if (Array.isArray(p.color)) {
       // dual-color candle swatch: diagonal split, up-color over down-color
-      const s = 13, sx = p.x, sy = y - 11;
+      const s = LEG_SWATCH, sx = p.x, sy = y - 14;
       g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + s, sy); g.lineTo(sx, sy + s); g.closePath();
       g.fillStyle = p.color[0]; g.fill();
       g.beginPath(); g.moveTo(sx + s, sy); g.lineTo(sx + s, sy + s); g.lineTo(sx, sy + s); g.closePath();
       g.fillStyle = p.color[1]; g.fill();
     } else {
-      g.fillStyle = p.color; g.fillRect(p.x, y - 9, 14, 5);
+      g.fillStyle = p.color; g.fillRect(p.x, y - 12, LEG_SWATCH, 7);
     }
-    g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + 20, y);
+    g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + LEG_SWATCH + 10, y);
   }
 
   const fy = H - 58;
   g.strokeStyle = 'rgba(143,165,212,0.15)';
   g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
-  g.fillStyle = '#6B7FAB'; g.font = '600 13px Syne, sans-serif';
-  g.fillText('State of Solana', PAD, fy + 32);
-  g.fillStyle = '#F97316'; g.font = '700 15px Syne, sans-serif';
-  const cta = 'Visit stateofsol.com →';
+  g.fillStyle = '#F97316'; g.font = '700 17px Syne, sans-serif';
+  const cta = 'StateOfSOL.com';
   g.fillText(cta, W - PAD - g.measureText(cta).width, fy + 33);
   return cv;
 }
@@ -952,6 +955,58 @@ function saveCanvas(cv, name) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }, 'image/png');
+}
+
+/* Snapshot a live chart at export fidelity.
+   The card canvas is only ~545 CSS px wide, so the share image was upscaling it
+   past 2x — axis labels came out soft and small. Bump the backing store and the
+   tick size for one frame, copy the pixels out, then put it straight back. */
+function snapshotChart(chart, targetTickPx = 22, dpr = 4) {
+  // Cards differ in on-screen width (and shrink with the window), so a fixed
+  // tick size would land at a different size in every download. Solve for the
+  // size that renders at targetTickPx once the bitmap is scaled to fit the card.
+  const scale = SHARE_CHART_W / (chart.canvas.clientWidth || SHARE_CHART_W);
+  const tickPx = Math.max(9, Math.round(targetTickPx / scale));
+  // update() rebuilds the per-scale font objects, so the path has to be
+  // re-walked for every write — caching the reference means the restore lands
+  // on a detached object and the card keeps the export's oversized ticks.
+  const AX = ['x', 'y'];
+  // some scales declare no font at all (the price chart rides Chart.js's 12px
+  // default) — give them one so they can be scaled up like the rest
+  const fontOf = k => {
+    const ticks = chart.config.options.scales?.[k]?.ticks;
+    if (!ticks) return null;
+    return (ticks.font ??= {});
+  };
+  const setSizes = fn => AX.forEach((k, i) => {
+    const f = fontOf(k);
+    if (f) f.size = fn(i);          // undefined restores the Chart.js default
+  });
+  const saved = {
+    hadDpr: Object.prototype.hasOwnProperty.call(chart.config.options, 'devicePixelRatio'),
+    dpr: chart.config.options.devicePixelRatio,
+    sizes: AX.map(k => fontOf(k)?.size),
+  };
+  const snap = document.createElement('canvas');
+  try {
+    chart.config.options.devicePixelRatio = dpr;
+    setSizes(() => tickPx);
+    chart.resize(); chart.update('none');
+    // charts that declare an animation (the price chart does) defer their paint
+    // to rAF, so update() alone would leave an empty canvas to copy
+    chart.draw();
+    snap.width = chart.canvas.width; snap.height = chart.canvas.height;
+    snap.getContext('2d').drawImage(chart.canvas, 0, 0);
+  } finally {
+    if (saved.hadDpr) chart.config.options.devicePixelRatio = saved.dpr;
+    else delete chart.config.options.devicePixelRatio;
+    setSizes(i => saved.sizes[i]);
+    // pass explicit dimensions: a bare resize() sees an unchanged CSS box and
+    // can defer, leaving the 4x backing store live until some later layout tick
+    chart.resize(chart.canvas.clientWidth, chart.canvas.clientHeight);
+    chart.update('none'); chart.draw();
+  }
+  return snap;
 }
 
 async function buildTrendImage(key, title, fmt, el) {
@@ -968,7 +1023,8 @@ async function buildTrendImage(key, title, fmt, el) {
       label: d.label, color: d.borderColor, val: d.data[d.data.length - 1]?.y }));
   }
   const note = el.querySelector('.note').textContent.trim();
-  return buildShareImage(chart.canvas, title, note, items, fmt);
+  await dfdvLogo();                      // resolve first: snapshot is restored immediately
+  return buildShareImage(snapshotChart(chart), title, note, items, fmt);
 }
 
 async function downloadTrendImage(key, title, fmt, el, range) {
@@ -990,7 +1046,8 @@ async function downloadPriceImage() {
       label: RB.NAMES[String(k)], color: RB.COLORS[String(k)], val: bandAt(last.x, k) })));
   }
   const title = state.rainbow ? "DFDV's Solana Rainbow Chart" : 'SOL Price History';
-  const cv = await buildShareImage(priceChart.canvas, title, note, items, price);
+  await dfdvLogo();                      // resolve first: snapshot is restored immediately
+  const cv = await buildShareImage(snapshotChart(priceChart), title, note, items, price);
   if (cv) saveCanvas(cv, `state-of-solana-sol-price-${state.range}.png`);
 }
 
@@ -1076,8 +1133,10 @@ function makeTrendCard(t) {
     const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   }));
+  // the card header sits above a chain legend, but a downloaded PNG travels
+  // alone — say what the lines are
   el.querySelector('[data-cdl]').addEventListener('click', () =>
-    downloadTrendImage(orig.key, t.title, t.fmt, el, range));
+    downloadTrendImage(orig.key, t.title + (cmp ? ' by Chain' : ''), t.fmt, el, range));
   const canvas = el.querySelector('canvas');
 
   if (range === '1d') {
