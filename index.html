@@ -244,6 +244,7 @@
   .uchip.live    { color: #052E1C; background: var(--mint); }
   .uchip.pending { color: #12100B; background: var(--orange); }
   .uchip.dev     { color: #0B1430; background: var(--peri); }
+  .uchip.gov     { color: #04222E; background: #38BDF8; }
   .udesc { font-size: 13px; color: var(--peri); font-weight: 600; margin-top: 9px; line-height: 1.45; }
   .uinfo { position: relative; display: inline-flex; align-items: center; justify-content: center;
            width: 19px; height: 19px; border-radius: 50%; border: 1px solid var(--line);
@@ -484,7 +485,7 @@
 
 <!-- ------------------------------------------------------ network upgrades -->
 <div class="shead"><h2>Network Upgrades</h2><span class="rule"></span>
-  <span class="asof">per <a href="https://solana.com/upgrades" target="_blank" rel="noopener">solana.com/upgrades</a></span></div>
+  <span class="asof">per <a href="https://solana.com/upgrades" target="_blank" rel="noopener">solana.com/upgrades</a> + governance votes</span></div>
 <section class="grid" id="upgradeGrid"></section>
 
 <!-- --------------------------------------------------------- trending news -->
@@ -1661,6 +1662,9 @@ function renderYield(y) {
 // update this list when that page changes. Tooltips are the plain-English
 // "what does this mean and why should I care" layer.
 const UPGRADES = [
+  { name: 'Double Disinflation Rate (SIMD-0550)', status: 'gov',
+    desc: 'SOL inflation now decays 30% per year instead of 15%.',
+    tip: '<b>In simple terms:</b> Solana&rsquo;s inflation rate already shrinks every year; this doubles how fast — from 15% to 30% per year. Validators approved it in August 2026 in Solana&rsquo;s first binding governance vote (SGP-0002, 67% of participating stake in favor).<br><br><b>Why it matters:</b> the network hits its final 1.5% inflation about three years earlier (~2029 instead of ~2032), issuing roughly 19 million fewer SOL — about 2.6% less supply — which means less ongoing sell pressure from staking emissions.' },
   { name: 'Alpenglow', status: 'dev', desc: 'Next-generation consensus protocol targeting 150 ms finality.',
     tip: '<b>In simple terms:</b> a rebuild of how validators agree on new blocks. Today a transaction is fully final in about 12 seconds; Alpenglow targets 150 milliseconds.<br><br><b>Why it matters:</b> payments and trades would confirm about as fast as a card swipe, closing the gap with centralized exchanges.' },
   { name: 'Reduced Slot Times', status: 'pending', desc: 'Cuts block time from 400 ms to 200 ms.',
@@ -1680,7 +1684,8 @@ const UPGRADES = [
   { name: 'New Cryptography Schemes', status: 'dev', desc: 'Native BN254 G2 and BLS12-381 curve operations.',
     tip: '<b>In simple terms:</b> the math used by zero-knowledge proofs gets built into the network itself instead of being computed the slow way.<br><br><b>Why it matters:</b> privacy features, ZK bridges and rollup-style apps become far cheaper and more practical on Solana.' },
 ];
-const U_STATUS = { live: 'Live on Mainnet', pending: 'Pending Activation', dev: 'In Development' };
+const U_STATUS = { live: 'Live on Mainnet', pending: 'Pending Activation', dev: 'In Development',
+                   gov: 'Approved by Vote' };
 
 function renderUpgrades() {
   $('upgradeGrid').innerHTML = UPGRADES.map(u => `
