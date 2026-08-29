@@ -265,6 +265,11 @@
   .uinfo .tipbox.flip-right { left: 0; transform: none; }
 
   /* news feed */
+  #newsList { max-height: 540px; overflow-y: auto; padding-right: 10px;
+              scrollbar-width: thin; scrollbar-color: rgba(143,165,212,0.35) transparent; }
+  #newsList::-webkit-scrollbar { width: 8px; }
+  #newsList::-webkit-scrollbar-thumb { background: rgba(143,165,212,0.3); border-radius: 99px; }
+  #newsList::-webkit-scrollbar-track { background: transparent; }
   .news-row { display: flex; align-items: baseline; gap: 13px; padding: 10px 0; border-top: 1px solid var(--line-2); }
   .news-row:first-child { border-top: none; padding-top: 2px; }
   .news-src { flex: none; width: 108px; font-size: 10px; font-weight: 700; letter-spacing: .07em;

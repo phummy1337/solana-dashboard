@@ -716,7 +716,7 @@ def main() -> int:
     # SolanaFloor has no RSS, but its Directus CMS is publicly readable.
     try:
         sf = get("https://cms.solanafloor.com/items/articles"
-                 "?limit=12&sort=-date_created&fields=title,slug,date_created,status",
+                 "?limit=15&sort=-date_created&fields=title,slug,date_created,status",
                  {"User-Agent": "Mozilla/5.0"})
         _collect("SolanaFloor", [
             {"t": a["title"], "u": f"https://solanafloor.com/news/{a['slug']}",
@@ -733,9 +733,9 @@ def main() -> int:
     for source, items in by_source.items():
         items = [x for x in items if x["d"] >= fresh_cutoff]
         items.sort(key=lambda x: x["d"], reverse=True)
-        news.extend(items[:4])
+        news.extend(items[:8])
     news.sort(key=lambda x: x["d"], reverse=True)
-    data["news"] = news[:14]
+    data["news"] = news[:34]
     mix = {s: sum(1 for x in data["news"] if x["s"] == s) for s in by_source}
     print(f"  news: keeping {len(data['news'])} · mix {mix}")
 
