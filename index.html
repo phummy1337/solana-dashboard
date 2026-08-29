@@ -208,6 +208,12 @@
   .trend-ctl.small { gap: 3px; }
   .trend-ctl.small .tgl { padding: 2px 7px; font-size: 10px; border-radius: 9px; }
   .ctl-sep { width: 1px; height: 14px; background: var(--line); margin: 0 4px; align-self: center; }
+  /* Export sits under its own chart, bottom-right, rather than crowding the
+     header controls. Muted until hover so it reads as a utility, not a control. */
+  .dlrow { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .dlrow .dlbtn { padding: 2px 8px; font-size: 10px; border-radius: 9px; opacity: 0.6; }
+  .dlrow .dlbtn:hover, .dlrow .dlbtn:focus-visible { opacity: 1; }
+  .stage .dlrow { margin-top: 10px; }
   select.rsel { font-family: Syne; font-size: 14px; font-weight: 700; color: var(--peri);
                 background: var(--panel); border: 1px solid rgba(143,165,212,0.2); border-radius: 20px;
                 padding: 7px 12px; cursor: pointer; appearance: auto; }
@@ -362,7 +368,6 @@
   </div>
   <div class="split-right">
     <div class="shead"><h2>SOL Price History</h2><span class="rule"></span>
-      <button class="tgl" id="priceDl" title="Download this chart as PNG">⤓ PNG</button>
       <button class="tgl" id="priceFs" title="Expand the chart">⛶ Expand</button></div>
     <div class="controls">
       <span class="ctl-label">Range</span>
@@ -376,12 +381,15 @@
       <button class="tgl" id="rainbowBtn" aria-pressed="true" style="margin-left:10px">🌈 SOL Rainbow</button>
       <span class="spacer"></span>
       <span class="ctl-label">Scale</span>
-      <button class="tgl" data-scale="linear" aria-pressed="false">Linear</button>
-      <button class="tgl" data-scale="logarithmic" aria-pressed="true">Log</button>
+      <select class="rsel" id="priceScale" aria-label="Axis scale">
+        <option value="linear">Linear</option>
+        <option value="logarithmic" selected>Log</option>
+      </select>
     </div>
     <section class="stage">
       <div class="wrap"><canvas id="priceChart" role="img" aria-label="SOL price history"></canvas></div>
       <div class="legend" id="rbLegend" style="display:none; justify-content:center; margin-top:10px"></div>
+      <div class="dlrow"><button class="tgl dlbtn" id="priceDl" title="Download this chart as PNG">⤓ PNG</button></div>
     </section>
   </div>
 </div>
@@ -756,8 +764,22 @@ const CHAINS = [
   { key: 'hyperevm',  name: 'Hyperliquid', color: '#0EA5A0', width: 1.3 },
   { key: 'polygon',   name: 'Polygon',     color: '#E879F9', width: 1.3 },
 ];
+/* TPS spans four orders of magnitude across chains (Solana ~2,000, Hyperliquid
+   ~8), so precision has to scale with the value. */
+const tps = v => v == null || isNaN(v) ? '—'
+  : v >= 100 ? Math.round(v).toLocaleString()
+  : v >= 10 ? v.toFixed(1) : v.toFixed(2);
 const TRENDS = [
-  { key: 'ytd_transactions',        compare: 'transactions',      title: 'Transactions',      color: '#38BDF8', fmt: compact, agg: 'sum' },
+  { key: 'ytd_transactions',        compare: 'transactions',      title: 'Transactions',      color: '#38BDF8', fmt: compact, agg: 'sum',
+    variants: [
+      { id: 'total', label: 'Total', compare: 'transactions', fmt: compact, agg: 'sum' },
+      // Average transactions per second: the bucket's MEAN daily count over
+      // 86,400. Taking the mean (not the sum) is what makes this correct at
+      // every aggregation level, including a partial current week or month.
+      { id: 'tps', label: 'TPS', compare: 'transactions', fmt: tps, agg: 'mean',
+        perSecond: true, title: 'Transactions per Second',
+        noteUnit: ' · average transactions per second' },
+    ] },
   { key: 'ytd_dex_volume',          compare: 'dex_volume',        title: 'Spot DEX Volume',   color: '#14F195', fmt: usd, agg: 'sum' },
   { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply', color: '#E9469A', fmt: usd, agg: 'last' },
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',          color: '#4ADE80', fmt: usd, agg: 'last' },
@@ -1054,12 +1076,16 @@ async function downloadPriceImage() {
 /* One card, at its own range; re-made in place when its range buttons change. */
 function makeTrendCard(t) {
   const orig = t;
-  // Variant cards (FSR) swap the underlying compare series and formatter.
+  // Variant cards swap the underlying series, formatter, aggregation mode and
+  // title. Everything except the button's own id/label is an override, so a
+  // variant can change as much or as little as it needs (FSR swaps the series;
+  // TPS keeps the series and only rescales it).
   let variant = null;
   if (t.variants) {
     const vid = state.trendVariants[t.key] || t.variants[0].id;
     variant = t.variants.find(v => v.id === vid) || t.variants[0];
-    t = { ...t, compare: variant.compare, fmt: variant.fmt };
+    const { id, label, ...ov } = variant;
+    t = { ...t, ...ov };
   }
   const { trendSeries: series, trendCompare: comparisons } = state;
   const range = state.trendRanges[t.key] || '3m';
@@ -1085,6 +1111,7 @@ function makeTrendCard(t) {
   const el = document.createElement('div');
   el.className = 'panel';
   const noteTail = (range === '1d' ? ' · latest complete day' : '')
+                 + (t.noteUnit || '')
                  + (period !== 'd' ? ' · ' + TREND_AGGS.find(a => a[0] === period)[1].toLowerCase()
                     + (aggMode === 'sum' ? ' totals' : aggMode === 'mean' ? ' averages' : ', period end') : '')
                  + (logScale ? ' · log scale' : '')
@@ -1096,18 +1123,17 @@ function makeTrendCard(t) {
           `<option value="${k}"${k === range ? ' selected' : ''}>${k.toUpperCase()}</option>`).join('')}</select>
         <select class="rsel" data-cagg-sel aria-label="Aggregation">${TREND_AGGS.map(([k, label]) =>
           `<option value="${k}"${k === period ? ' selected' : ''}>${label}</option>`).join('')}</select>
+        <select class="rsel" data-cscale-sel aria-label="Axis scale">
+          <option value="lin"${logScale ? '' : ' selected'}>Linear</option>
+          <option value="log"${logScale ? ' selected' : ''}>Log</option></select>
         <span class="ctl-sep"></span>
-        <button class="tgl" data-cscale="lin" aria-pressed="${!logScale}">LIN</button>
-        <button class="tgl" data-cscale="log" aria-pressed="${logScale}">LOG</button>
-        <span class="ctl-sep"></span>
-        <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button>
-        <span class="ctl-sep"></span>
-        <button class="tgl" data-cdl title="Download this chart as PNG">⤓ PNG</button></span></div>
+        <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button></span></div>
     ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
         `<button class="tgl" data-cvariant="${v.id}" aria-pressed="${v.id === variant.id}">${v.label}</button>`).join('')}</div>` : ''}
     <div class="note">Latest · ${fmtDate(last.d)}${noteTail}</div>
     <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
-    ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}`;
+    ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}
+    <div class="dlrow"><button class="tgl dlbtn" data-cdl title="Download this chart as PNG">⤓ PNG</button></div>`;
   el.querySelector('[data-crange-sel]').addEventListener('change', e => {
     state.trendRanges[t.key] = e.target.value;
     const fresh = makeTrendCard(t);
@@ -1118,11 +1144,11 @@ function makeTrendCard(t) {
     const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   });
-  el.querySelectorAll('[data-cscale]').forEach(b => b.addEventListener('click', () => {
-    state.trendScales[t.key] = b.dataset.cscale;
-    const fresh = makeTrendCard(t);
+  el.querySelector('[data-cscale-sel]').addEventListener('change', e => {
+    state.trendScales[t.key] = e.target.value;
+    const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
-  }));
+  });
   el.querySelector('[data-csmooth]').addEventListener('click', () => {
     state.trendSmooth[t.key] = !state.trendSmooth[t.key];
     const fresh = makeTrendCard(orig);
@@ -1141,10 +1167,11 @@ function makeTrendCard(t) {
 
   if (range === '1d') {
       // Single-day view: a bar per chain (or one bar for Solana-only metrics).
+      const per = v => t.perSecond ? v / 86400 : v;
       const bars = cmp
         ? CHAINS.filter(c => cmp[c.key]?.length)
-            .map(c => ({ name: c.name, color: c.color, v: cmp[c.key][cmp[c.key].length - 1].v }))
-        : [{ name: 'Solana', color: t.color, v: last.v }];
+            .map(c => ({ name: c.name, color: c.color, v: per(cmp[c.key][cmp[c.key].length - 1].v) }))
+        : [{ name: 'Solana', color: t.color, v: per(last.v) }];
       trendCharts[t.key] = new Chart(canvas, {
         type: 'bar',
         data: { labels: bars.map(b => b.name),
@@ -1173,6 +1200,7 @@ function makeTrendCard(t) {
 
     const prep = pts => {
       let out = aggregateSeries(pts, period, aggMode);
+      if (t.perSecond) out = out.map(p => ({ d: p.d, v: p.v / 86400 }));
       if (smooth) out = ma7(out);
       return clip(out);
     };
@@ -1541,20 +1569,20 @@ $('priceRange').addEventListener('change', e => {
   state.range = e.target.value;
   drawPrice();
 });
-document.querySelectorAll('[data-scale]').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('[data-scale]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
-  state.scale = b.dataset.scale;
+$('priceScale').addEventListener('change', e => {
+  state.scale = e.target.value;
   drawPrice();
-}));
+});
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
   state.mode = b.dataset.mode;
   renderTiles();
 }));
 function setScale(scale) {
-  state.scale = scale;
-  document.querySelectorAll('[data-scale]').forEach(o =>
-    o.setAttribute('aria-pressed', String(o.dataset.scale === scale)));
+  // guards the rainbow toggle's restore path: preRainbowScale is undefined
+  // until the rainbow has been switched on at least once
+  state.scale = scale || 'logarithmic';
+  $('priceScale').value = state.scale;
 }
 $('priceDl').addEventListener('click', downloadPriceImage);
 function setPricePopup(open) {
