@@ -279,7 +279,12 @@
   .news-t a { color: var(--ink); text-decoration: none; }
   .news-t a:hover { color: var(--orange); }
   .news-time { flex: none; font-size: 12px; font-weight: 600; color: var(--mute); }
-  @media (max-width: 640px) { .news-src { width: 84px; } .news-time { display: none; } }
+  .news-src { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 640px) {
+    .news-row { flex-wrap: wrap; gap: 3px 13px; }
+    .news-src { width: 100%; }          /* source on its own line above the headline */
+    .news-time { display: none; }
+  }
 
   .ytable a.plink { color: var(--peri); text-decoration: none; border-bottom: 1px dotted rgba(143,165,212,0.45); }
   .ytable a.plink:hover { color: var(--ink); border-bottom-color: var(--orange); }
@@ -306,6 +311,21 @@
 
   @media (max-width: 760px) {
     header, .shead, .tiles, .controls, .stage, .grid, .split, footer { padding-left: 18px; padding-right: 18px; }
+    /* the flex rule pushes header buttons onto their own line — drop it */
+    .shead .rule { display: none; }
+    .shead { flex-wrap: wrap; row-gap: 6px; }
+    /* Tooltips become a bottom sheet: absolute boxes overlapped neighbouring
+       cards (and ran off-screen) on narrow viewports. */
+    .uinfo .tipbox {
+      position: fixed; left: 12px; right: 12px; bottom: 14px;
+      top: auto; transform: none; width: auto; max-width: none;
+      font-size: 14px; padding: 15px 17px; z-index: 1200;
+      /* fully opaque — a translucent sheet let card text bleed through */
+      background: #0A1428; border-color: rgba(143,165,212,0.45);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.75);
+    }
+    .uinfo .tipbox.flip-left, .uinfo .tipbox.flip-right { left: 12px; right: 12px; transform: none; }
+    .uinfo { width: 22px; height: 22px; font-size: 12.5px; }
     header { flex-direction: column; }
     /* The nowrap "as of" stamp overflows a phone; drop it to its own line. */
     .shead { flex-wrap: wrap; row-gap: 3px; }
