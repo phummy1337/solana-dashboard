@@ -790,6 +790,15 @@ const CHAINS = [
   { key: 'hyperevm',  name: 'Hyperliquid', color: '#0EA5A0', width: 1.3 },
   { key: 'polygon',   name: 'Polygon',     color: '#E879F9', width: 1.3 },
 ];
+/* The stablecoin card compares issuers on Solana rather than chains, so it
+   carries its own series list; makeTrendCard uses `t.series` when present. */
+const STABLES = [
+  { key: 'Total', name: 'All stablecoins', color: '#14F195', width: 2.2 },
+  { key: 'USDC',  name: 'USDC',            color: '#2775CA', width: 1.4 },
+  { key: 'USDT',  name: 'USDT',            color: '#26A17B', width: 1.4 },
+  { key: 'PYUSD', name: 'PYUSD',           color: '#F5A524', width: 1.4 },
+  { key: 'USDS',  name: 'USDS',            color: '#E9469A', width: 1.4 },
+];
 /* TPS spans four orders of magnitude across chains (Solana ~2,000, Hyperliquid
    ~8), so precision has to scale with the value. */
 const tps = v => v == null || isNaN(v) ? '—'
@@ -1116,7 +1125,8 @@ function makeTrendCard(t) {
   const { trendSeries: series, trendCompare: comparisons } = state;
   const range = state.trendRanges[t.key] || '3m';
   const cmp = t.compare && comparisons[t.compare];
-  const solPts = cmp ? cmp.solana : series[t.key];
+  const seriesList = t.series || CHAINS;
+  const solPts = cmp ? cmp[t.solKey || 'solana'] : series[t.key];
   if (!solPts || !solPts.length) return null;
   const last = solPts[solPts.length - 1];
   const cutoff = range === '1d' ? null : trendCutoff(range);
@@ -1195,7 +1205,7 @@ function makeTrendCard(t) {
       // Single-day view: a bar per chain (or one bar for Solana-only metrics).
       const per = v => t.perSecond ? v / 86400 : v;
       const bars = cmp
-        ? CHAINS.filter(c => cmp[c.key]?.length)
+        ? seriesList.filter(c => cmp[c.key]?.length)
             .map(c => ({ name: c.name, color: c.color, v: per(cmp[c.key][cmp[c.key].length - 1].v) }))
         : [{ name: 'Solana', color: t.color, v: per(last.v) }];
       trendCharts[t.key] = new Chart(canvas, {
@@ -1233,7 +1243,7 @@ function makeTrendCard(t) {
     const hiddenSet = state.trendHidden[orig.key] || new Set();
     let datasets;
     if (cmp) {
-      datasets = CHAINS.filter(c => cmp[c.key]).map(c => ({
+      datasets = seriesList.filter(c => cmp[c.key]).map(c => ({
         label: c.name,
         data: prep(cmp[c.key]).filter(p => p.v > 0).map(p => ({ x: p.d, y: p.v })),
         borderColor: c.color, borderWidth: c.width, order: c.key === 'solana' ? 10 : 1,
@@ -1245,7 +1255,7 @@ function makeTrendCard(t) {
         const ds = datasets.find(d => d.label === name);
         return ds?.data[ds.data.length - 1]?.y;
       };
-      el.querySelector('.legend').innerHTML = CHAINS.filter(c => cmp[c.key]).map(c => {
+      el.querySelector('.legend').innerHTML = seriesList.filter(c => cmp[c.key]).map(c => {
         const v = lastOf(c.name);
         return `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
            <span class="sw" style="background:${c.color}"></span>${c.name}
