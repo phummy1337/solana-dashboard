@@ -916,8 +916,25 @@ function aggregateSeries(pts, period, mode) {
     if (!b) buckets.set(key, b = { d: p.d, sum: 0, n: 0, last: p.v });
     b.sum += p.v; b.n++; b.last = p.v; b.d = p.d;
   }
-  return [...buckets.values()].map(b =>
+  let out = [...buckets.values()].map(b =>
     ({ d: b.d, v: mode === 'sum' ? b.sum : mode === 'mean' ? b.sum / b.n : b.last }));
+  // A bucket still in progress is not comparable to the completed ones — a
+  // month one day old reads as a collapse on a totals chart and as a bogus
+  // "monthly return" on a performance chart. Drop the tail unless it closed.
+  if (out.length && !periodClosed(out[out.length - 1].d, period)) out = out.slice(0, -1);
+  return out;
+}
+
+/* Did `dateStr` land on the final day of its bucket? */
+function periodClosed(dateStr, period) {
+  const dt = new Date(dateStr + 'T00:00:00Z');
+  const y = dt.getUTCFullYear(), m = dt.getUTCMonth(), day = dt.getUTCDate();
+  const lastOfMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  if (period === 'w') return dt.getUTCDay() === 0;              // Monday-start weeks
+  if (period === 'm') return day === lastOfMonth;
+  if (period === 'q') return day === lastOfMonth && m % 3 === 2;
+  if (period === 'y') return m === 11 && day === 31;
+  return true;
 }
 
 function sparkOptions(t, unit, logScale) {
@@ -1217,7 +1234,9 @@ function makeTrendCard(t) {
   const noteTail = (range === '1d' ? ' · latest complete day' : '')
                  + (t.noteUnit || '')
                  + (period !== 'd' ? ' · ' + TREND_AGGS.find(a => a[0] === period)[1].toLowerCase()
-                    + (aggMode === 'sum' ? ' totals' : aggMode === 'mean' ? ' averages' : ', period end') : '')
+                    + (t.rebase ? ' change per period'
+                       : aggMode === 'sum' ? ' totals' : aggMode === 'mean' ? ' averages' : ', period end') : '')
+                 + (t.rebase && period === 'd' ? ' · cumulative from window start' : '')
                  + (logScale ? ' · log scale' : '')
                  + (smooth ? (period === 'd' ? ' · 7-day average' : ' · 7-period average') : '');
   el.innerHTML = `<div class="crow"><h3 style="display:flex;align-items:center">${t.title}${t.tip
@@ -1237,7 +1256,7 @@ function makeTrendCard(t) {
         <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button>`}</span></div>
     ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
         `<button class="tgl" data-cvariant="${v.id}" aria-pressed="${v.id === variant.id}">${v.label}</button>`).join('')}</div>` : ''}
-    <div class="note">Latest · ${fmtDate(last.d)}${noteTail}</div>
+    <div class="note" data-tail="${noteTail}">Latest · ${fmtDate(last.d)}${noteTail}</div>
     <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
     ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}
     <div class="dlrow"><button class="tgl dlbtn" data-cdl title="Download this chart as PNG">⤓ PNG</button></div>`;
@@ -1321,9 +1340,20 @@ function makeTrendCard(t) {
       let out = aggregateSeries(pts, period, aggMode);
       if (t.perSecond) out = out.map(p => ({ d: p.d, v: p.v / 86400 }));
       if (smooth) out = ma7(out);
+      if (t.rebase && period !== 'd') {
+        // Coarser than daily means the user asked for period returns: each
+        // bucket's own change (e.g. "monthly performance"), not a cumulative
+        // curve sampled monthly. Computed before clipping so the first visible
+        // period still measures against the period that preceded it.
+        out = out.map((p, i) => {
+          const base = i ? out[i - 1].v : null;
+          return { d: p.d, v: base ? (p.v / base - 1) * 100 : 0 };
+        }).slice(1);
+        return clip(out);
+      }
       out = clip(out);
-      // Rebase after clipping so every asset starts at 0% for the visible
-      // window — prices spanning $0.72 to $77,000 share no other axis.
+      // Daily: rebase to the window start so every asset shares an axis —
+      // prices spanning $0.72 to $77,000 have nothing else in common.
       if (t.rebase && out.length) {
         const base = out[0].v;
         out = base ? out.map(p => ({ d: p.d, v: (p.v / base - 1) * 100 })) : out;
@@ -1375,6 +1405,14 @@ function makeTrendCard(t) {
       }];
     }
 
+  // Restate the date as the last point actually drawn — trimming partial
+  // periods can pull it back from the raw series' tail.
+  const plotted = datasets.flatMap(ds => ds.data).map(p => p.x).sort();
+  if (plotted.length) {
+    const noteEl = el.querySelector('.note');
+    noteEl.textContent = `Latest · ${fmtDate(plotted[plotted.length - 1])}` +
+                         (noteEl.dataset.tail || '');
+  }
   trendCharts[t.key] = new Chart(canvas, {
     type: 'line', data: { datasets }, options: sparkOptions(t, unit, logScale),
   });
