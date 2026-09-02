@@ -796,7 +796,11 @@ def main() -> int:
                 time.sleep(12)  # stay under CoinGecko's free-tier limiter
             j = get(f"https://api.coingecko.com/api/v3/coins/{cg_id}"
                     "/market_chart?vs_currency=usd&days=365&interval=daily")
-            pts = [{"d": datetime.fromtimestamp(t / 1000, tz=timezone.utc).date().isoformat(),
+            # CoinGecko's daily points are 00:00 UTC snapshots, so the sample
+            # stamped date D is really the close of D-1. Shift it back, or every
+            # price sits a day late and month boundaries land on the wrong close.
+            pts = [{"d": (datetime.fromtimestamp(t / 1000, tz=timezone.utc).date()
+                          - timedelta(days=1)).isoformat(),
                     "v": v} for t, v in (j.get("prices") or [])]
             pts = [p for p in pts if p["d"] < today_utc]
             if pts:

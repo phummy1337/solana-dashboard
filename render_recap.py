@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import calendar
 import json
 import sys
 import urllib.request
@@ -34,11 +35,19 @@ MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "N
 
 INK, MUTE, DIM = (241, 245, 251), (143, 165, 212), (107, 127, 171)
 MINT, RED, ORANGE = (20, 241, 149), (255, 107, 107), (249, 115, 22)
-PANEL, EDGE = (13, 26, 52), (35, 52, 84)
+PANEL, EDGE, SLATE = (13, 26, 52), (35, 52, 84), (60, 78, 120)
+CHAIN_SHORT = {"solana": "SOL", "ethereum": "ETH", "base": "BASE",
+               "arbitrum": "ARB", "bnb": "BNB", "avalanche": "AVAX",
+               "sui": "SUI", "tron": "TRX", "hyperevm": "HYPE",
+               "polygon": "POL"}
 CHAIN_LABEL = {"solana": "Solana", "ethereum": "Ethereum", "base": "Base",
                "arbitrum": "Arbitrum", "bnb": "BNB", "avalanche": "Avalanche",
                "sui": "Sui", "tron": "Tron", "hyperevm": "Hyperliquid",
                "polygon": "Polygon"}
+# CoinGecko asset name -> ticker for the performance panel
+TICKER = {"Solana": "SOL", "Bitcoin": "BTC", "Ethereum": "ETH", "BNB": "BNB",
+          "Avalanche": "AVAX", "Sui": "SUI", "Tron": "TRX", "Polygon": "POL",
+          "Arbitrum": "ARB", "Hyperliquid": "HYPE"}
 
 _cache: dict = {}
 
@@ -64,7 +73,6 @@ def f_syne(size: int, weight: int = 700) -> ImageFont.FreeTypeFont:
 
 
 def f_num(size: int, weight: int = 700) -> ImageFont.FreeTypeFont:
-    # Inter is variable on (opsz, wght); pin optical size so weights stay stable
     return _font("inter", size, [32, weight])
 
 
@@ -80,6 +88,10 @@ def compact(n: float | None, prefix: str = "") -> str:
     return f"{prefix}{n:.2f}"
 
 
+def pct(v: float) -> str:
+    return f"{'+' if v >= 0 else ''}{v:.1f}%"
+
+
 def main() -> int:
     data = json.loads((HERE / "data.json").read_text())
     cmp_ = data.get("compare", {})
@@ -89,10 +101,8 @@ def main() -> int:
         f"{y}-{int(m):02d}" for y, row in grid.items() for m in row)
     year, mon = int(ym[:4]), int(ym[5:])
     prev = f"{year - 1}-12" if mon == 1 else f"{year}-{mon - 1:02d}"
-
-    def series(key, chain="solana"):
-        return [(p["d"], p["v"]) for p in cmp_.get(key, {}).get(chain, [])
-                if p["d"][:7] == ym]
+    days_in_month = calendar.monthrange(year, mon)[1]
+    month_secs = days_in_month * 86400
 
     def agg(key, how, month=None, chain="solana"):
         m = month or ym
@@ -105,24 +115,37 @@ def main() -> int:
         a, b = agg(key, how), agg(key, how, prev)
         return (a / b - 1) * 100 if (a and b) else None
 
-    prices = {p["d"]: p["v"] for p in data.get("series", {}).get("price", [])}
-    month_px = [(k, prices[k]) for k in sorted(prices) if k[:7] == ym]
-    pcloses = sorted(k for k in prices if k[:7] == prev)
-    ret = grid.get(str(year), {}).get(str(mon))
+    def month_total(key):
+        return {ch: sum(p["v"] for p in pts if p["d"][:7] == ym)
+                for ch, pts in cmp_.get(key, {}).items()}
 
-    tx = {ch: sum(p["v"] for p in pts if p["d"][:7] == ym)
-          for ch, pts in cmp_.get("transactions", {}).items()}
+    # ---- asset returns for the month, all from one price source (CoinGecko)
+    def last_in(pts, m):
+        vals = [p["v"] for p in pts if p["d"][:7] == m]
+        return vals[-1] if vals else None
+
+    perf = {}
+    for asset, pts in cmp_.get("price_perf", {}).items():
+        a, b = last_in(pts, prev), last_in(pts, ym)
+        if a and b:
+            perf[asset] = (b / a - 1) * 100
+    perf_rank = sorted(perf.items(), key=lambda kv: -kv[1])
+    sol_ret = perf.get("Solana")
+    sol_pts = cmp_.get("price_perf", {}).get("Solana", [])
+    sol_open, sol_close = last_in(sol_pts, prev), last_in(sol_pts, ym)
+
+    tx = month_total("transactions")
     sol_tx, other_tx = tx.get("solana", 0), sum(v for c, v in tx.items() if c != "solana")
-    rev = {ch: sum(p["v"] for p in pts if p["d"][:7] == ym)
-           for ch, pts in cmp_.get("rev", {}).items()}
+    rev = month_total("rev")
     rev_rank = sorted(rev.items(), key=lambda kv: -kv[1])
     rev_total = sum(rev.values()) or 1
+    dex = month_total("dex_volume")
+    dex_rank = sorted(dex.items(), key=lambda kv: -kv[1])
 
-    # Layout is a fixed stack, so derive the canvas height from it rather than
-    # hard-coding one that leaves a dead band above the footer.
-    PY_, PH_, RH_, QH_, SH_, GAP = 132, 208, 248, 226, 104, 16
+    PY_, PH_, RH_, QH_, SH_, GAP = 132, 246, 268, 244, 104, 16
     W, S, PAD = 1200, 2, 56
     H = PY_ + PH_ + GAP + RH_ + GAP + QH_ + GAP + SH_ + 74
+
     img = Image.new("RGB", (W * S, H * S), "#030815")
     d = ImageDraw.Draw(img)
     for y in range(H * S):
@@ -140,6 +163,9 @@ def main() -> int:
                     fill=PANEL, outline=EDGE, width=S)
         text((x + 18, y + 15), title.upper(), f_syne(13 * S, 700), DIM)
 
+    def rect(x, y, w, h, fill):
+        d.rectangle([(x * S, y * S), ((x + w) * S, (y + h) * S)], fill=fill)
+
     # ---------------------------------------------------------------- header
     text((PAD, 34), "STATE OF SOLANA · MONTHLY RECAP", f_syne(15 * S, 700), MUTE)
     text((PAD, 60), f"{MONTHS[mon - 1]} {year}", f_syne(46 * S, 700), INK)
@@ -148,115 +174,135 @@ def main() -> int:
     logo = logo.resize((int(lh * logo.width / logo.height), lh), Image.LANCZOS)
     img.paste(logo, ((W - PAD) * S - logo.width, 36 * S), logo)
 
-    # ------------------------------------------------ 1. price, full width
+    # ------------------------- 1. SOL vs peers: the month's return, ranked
     py, ph = PY_, PH_
-    panel(PAD, py, W - PAD * 2, ph, "SOL price")
-    up = (ret or 0) >= 0
-    rtxt = "—" if ret is None else f"{'+' if up else ''}{ret:.1f}%"
-    rf = f_num(56 * S, 800)
-    text((PAD + 18, py + 44), rtxt, rf, MINT if up else RED)
-    rw = wide(rtxt, rf)
-    if month_px and pcloses:
-        text((PAD + 26 + rw, py + 52),
-             f"${prices[pcloses[-1]]:,.2f}  →  ${month_px[-1][1]:,.2f}",
-             f_num(20 * S, 600), (211, 219, 234))
-        lo, hi = min(v for _, v in month_px), max(v for _, v in month_px)
-        text((PAD + 26 + rw, py + 80), f"low ${lo:,.0f}    high ${hi:,.0f}",
-             f_num(16 * S, 500), DIM)
-    if len(month_px) > 2:
-        cx, cy = PAD + 500, py + 38
-        cw, chh = W - PAD * 2 - 520, ph - 62
-        lo, hi = min(v for _, v in month_px), max(v for _, v in month_px)
-        span = (hi - lo) or 1
-        pts = [(cx + i / (len(month_px) - 1) * cw, cy + chh - (v - lo) / span * chh)
-               for i, (_, v) in enumerate(month_px)]
-        d.polygon([(x * S, y * S) for x, y in pts] +
-                  [((cx + cw) * S, (cy + chh) * S), (cx * S, (cy + chh) * S)],
-                  fill=(11, 56, 58))
-        d.line([(x * S, y * S) for x, y in pts], fill=MINT, width=3 * S, joint="curve")
-        d.ellipse([((pts[-1][0] - 5) * S, (pts[-1][1] - 5) * S),
-                   ((pts[-1][0] + 5) * S, (pts[-1][1] + 5) * S)], fill=MINT)
+    panel(PAD, py, W - PAD * 2, ph, f"{MONTHS[mon - 1]} price performance vs peers")
+    if sol_ret is not None:
+        up = sol_ret >= 0
+        rf = f_num(50 * S, 800)
+        text((PAD + 18, py + 46), pct(sol_ret), rf, MINT if up else RED)
+        if sol_open and sol_close:
+            text((PAD + 18, py + 106), f"${sol_open:,.2f} → ${sol_close:,.2f}",
+                 f_num(17 * S, 600), (211, 219, 234))
+        rank = [a for a, _ in perf_rank].index("Solana") + 1
+        text((PAD + 18, py + 132), f"#{rank} of {len(perf_rank)} assets",
+             f_syne(15 * S, 700), MINT if rank <= 3 else MUTE)
 
-    # ---------------------- 2 & 3. transactions vs peers | REV leaderboard
+    if perf_rank:
+        gx, gw = PAD + 250, W - PAD * 2 - 268
+        gy, gh = py + 56, ph - 118
+        mx = max(abs(v) for _, v in perf_rank) or 1
+        zero = gy + gh * (max(v for _, v in perf_rank) / (mx * 2) + 0.5) \
+            if min(v for _, v in perf_rank) < 0 else gy + gh
+        zero = min(max(zero, gy + 24), gy + gh)
+        slot = gw / len(perf_rank)
+        for i, (asset, v) in enumerate(perf_rank):
+            bw_ = slot * 0.52
+            bx = gx + i * slot + (slot - bw_) / 2
+            span = (zero - gy - 22) if v >= 0 else (gy + gh - zero)
+            hgt = max(3, span * abs(v) / mx)
+            top_y = zero - hgt if v >= 0 else zero
+            is_sol = asset == "Solana"
+            rect(bx, top_y, bw_, hgt, MINT if is_sol else (SLATE if v >= 0 else (128, 58, 64)))
+            text((bx + bw_ / 2, top_y - 18), pct(v), f_num(13 * S, 700),
+                 MINT if is_sol else MUTE, anchor="ma")
+            text((bx + bw_ / 2, gy + gh + 8), TICKER.get(asset, asset[:4]),
+                 f_syne(13 * S, 700), INK if is_sol else DIM, anchor="ma")
+        d.line([(gx * S, zero * S), ((gx + gw) * S, zero * S)], fill=EDGE, width=S)
+
+    # ------------------ 2 & 3. transactions (+ implied TPS) | REV with Other
     ry, rh = py + ph + GAP, RH_
-    hw = (W - PAD * 2 - 16) / 2
+    hw = (W - PAD * 2 - GAP) / 2
 
     panel(PAD, ry, hw, rh, "Non-vote transactions")
     peak = max(sol_tx, other_tx) or 1
-    bx, bw, bh = PAD + 18, hw - 36, 46
+    bx, bw_, bh = PAD + 18, hw - 36, 42
     for i, (label, val, fill, col) in enumerate([
             ("Solana", sol_tx, MINT, INK),
-            (f"All {len(tx) - 1} other chains", other_tx, (60, 78, 120), MUTE)]):
-        by = ry + 62 + i * (bh + 44)
+            (f"All {len(tx) - 1} other chains", other_tx, SLATE, MUTE)]):
+        by = ry + 58 + i * 96
         text((bx, by - 22), label, f_syne(15 * S, 700), INK)
-        w = max(6, bw * val / peak)
-        d.rectangle([(bx * S, by * S), ((bx + w) * S, (by + bh) * S)], fill=fill)
-        vf = f_num(24 * S, 800)
+        w = max(6, bw_ * val / peak)
+        rect(bx, by, w, bh, fill)
+        vf = f_num(22 * S, 800)
         vw = wide(compact(val), vf)
-        inside = w > vw + 30
-        text((bx + w - vw - 14 if inside else bx + w + 12, by + 12), compact(val), vf,
+        inside = w > vw + 28
+        text((bx + w - vw - 12 if inside else bx + w + 12, by + 10), compact(val), vf,
              (4, 30, 22) if inside else col)
+        text((bx, by + bh + 5), f"{val / month_secs:,.0f} TPS implied",
+             f_num(14 * S, 600), MINT if i == 0 else DIM)
     if other_tx:
-        text((bx, ry + rh - 36), f"{sol_tx / other_tx:.1f}× every other chain combined",
-             f_syne(16 * S, 700), MINT)
+        text((bx, ry + rh - 30), f"{sol_tx / other_tx:.1f}× every other chain combined",
+             f_syne(15 * S, 700), MINT)
 
-    x2 = PAD + hw + 16
-    panel(x2, ry, hw, rh, f"Real economic value · share of {len(rev)} chains")
-    top = rev_rank[:5]
-    pk = top[0][1] or 1
-    for i, (ch, v) in enumerate(top):
-        by = ry + 54 + i * 37
-        text((x2 + 18, by + 3), CHAIN_LABEL.get(ch, ch), f_syne(14 * S, 700),
-             INK if ch == "solana" else MUTE)
-        bx2, bw2 = x2 + 132, hw - 262
-        w = max(4, bw2 * v / pk)
-        d.rectangle([(bx2 * S, (by + 2) * S), ((bx2 + w) * S, (by + 22) * S)],
-                    fill=MINT if ch == "solana" else (60, 78, 120))
-        text((x2 + hw - 18, by + 3), f"{v / rev_total * 100:.1f}%", f_num(15 * S, 700),
-             MINT if ch == "solana" else MUTE, anchor="ra")
+    x2 = PAD + hw + GAP
+    panel(x2, ry, hw, rh, "Real economic value")
+    top_rev = rev_rank[:4]
+    other_rev = sum(v for _, v in rev_rank[4:])
+    rows = [(CHAIN_LABEL.get(ch, ch), v, ch == "solana") for ch, v in top_rev]
+    if other_rev:
+        rows.append((f"Other ({len(rev_rank) - 4})", other_rev, False))
+    pk = max(v for _, v, _ in rows) or 1
+    for i, (name, v, is_sol) in enumerate(rows):
+        by = ry + 52 + i * 37
+        text((x2 + 18, by + 3), name, f_syne(14 * S, 700), INK if is_sol else MUTE)
+        bx2, bw2 = x2 + 132, hw - 300
+        rect(bx2, by + 2, max(4, bw2 * v / pk), 20, MINT if is_sol else SLATE)
+        text((x2 + hw - 76, by + 3), compact(v, "$"), f_num(15 * S, 700),
+             INK if is_sol else MUTE, anchor="ra")
+        text((x2 + hw - 18, by + 3), f"{v / rev_total * 100:.0f}%", f_num(14 * S, 600),
+             MINT if is_sol else DIM, anchor="ra")
+    text((x2 + 18, ry + rh - 32), f"Solana leads all {len(rev_rank)} chains this month"
+         if rev_rank and rev_rank[0][0] == "solana" else
+         f"Solana ranks #{[c for c, _ in rev_rank].index('solana') + 1} of {len(rev_rank)}",
+         f_syne(15 * S, 700), MINT)
 
-    # ------------------ 4 & 5. daily DEX volume | monthly returns this year
+    # ------------------- 4 & 5. DEX volume by chain | monthly returns, labelled
     qy, qh = ry + rh + GAP, QH_
-    panel(PAD, qy, hw, qh, "Daily DEX volume")
-    dex = series("dex_volume")
-    if dex:
-        vals = [v for _, v in dex]
-        pk = max(vals) or 1
-        gx, gy, gw, gh = PAD + 18, qy + 48, hw - 36, qh - 104
-        bwid = gw / len(vals)
-        for i, v in enumerate(vals):
-            hgt = max(2, gh * v / pk)
-            d.rectangle([((gx + i * bwid + 1) * S, (gy + gh - hgt) * S),
-                         ((gx + (i + 1) * bwid - 1) * S, (gy + gh) * S)], fill=MINT)
-        text((gx, qy + qh - 44), compact(sum(vals), "$"), f_num(22 * S, 700), INK)
-        text((gx, qy + qh - 20), "month total", f_syne(13 * S, 600), DIM)
-        text((gx + gw, qy + qh - 42), f"peak day {compact(pk, '$')}",
-             f_num(15 * S, 600), DIM, anchor="ra")
+    panel(PAD, qy, hw, qh, f"Spot DEX volume · {MONTHS[mon - 1]}")
+    if dex_rank:
+        gx, gy = PAD + 18, qy + 54
+        gw, gh = hw - 36, qh - 122
+        mxd = dex_rank[0][1] or 1
+        slot = gw / len(dex_rank)
+        for i, (ch, v) in enumerate(dex_rank):
+            bw2 = slot * 0.56
+            bxx = gx + i * slot + (slot - bw2) / 2
+            hgt = max(3, gh * v / mxd)
+            is_sol = ch == "solana"
+            rect(bxx, gy + gh - hgt, bw2, hgt, MINT if is_sol else SLATE)
+            text((bxx + bw2 / 2, gy + gh - hgt - 18), compact(v, "$"), f_num(12 * S, 700),
+                 MINT if is_sol else MUTE, anchor="ma")
+            text((bxx + bw2 / 2, gy + gh + 8), CHAIN_SHORT.get(ch, ch[:4].upper()),
+                 f_syne(12 * S, 700), INK if is_sol else DIM, anchor="ma")
+        share = dex_rank[0][1] / (sum(dex.values()) or 1) * 100
+        if dex_rank[0][0] == "solana":
+            text((gx, qy + qh - 32), f"{share:.0f}% of tracked DEX volume",
+                 f_syne(15 * S, 700), MINT)
 
     panel(x2, qy, hw, qh, f"SOL monthly return · {year}")
-    rows = grid.get(str(year), {})
-    months = sorted(int(k) for k in rows)
+    yr_rows = grid.get(str(year), {})
+    months = sorted(int(k) for k in yr_rows)
     if months:
-        mx = max(abs(rows[str(m)]) for m in months) or 1
-        gx, gy, gw, gh = x2 + 18, qy + 50, hw - 36, qh - 118
+        mx = max(abs(yr_rows[str(m)]) for m in months) or 1
+        gx, gy = x2 + 18, qy + 58
+        gw, gh = hw - 36, qh - 132
         mid = gy + gh / 2
         d.line([(gx * S, mid * S), ((gx + gw) * S, mid * S)], fill=EDGE, width=S)
-        bwid = gw / len(months)
+        slot = gw / len(months)
         for i, m in enumerate(months):
-            v = rows[str(m)]
-            hgt = (gh / 2) * abs(v) / mx
+            v = yr_rows[str(m)]
+            hgt = (gh / 2 - 14) * abs(v) / mx
             top_y, bot_y = (mid - hgt, mid) if v >= 0 else (mid, mid + hgt)
             cur = (m == mon)
             col = (MINT if v >= 0 else RED) if cur else ((16, 120, 90) if v >= 0 else (128, 58, 64))
-            d.rectangle([((gx + i * bwid + 4) * S, top_y * S),
-                         ((gx + (i + 1) * bwid - 4) * S, bot_y * S)], fill=col)
-            text((gx + (i + 0.5) * bwid, gy + gh + 10), MON3[m - 1], f_syne(12 * S, 700),
+            rect(gx + i * slot + 5, top_y, slot - 10, bot_y - top_y, col)
+            text((gx + (i + 0.5) * slot, (top_y - 17) if v >= 0 else (bot_y + 3)),
+                 pct(v), f_num(12 * S, 700), MINT if cur else DIM, anchor="ma")
+            text((gx + (i + 0.5) * slot, gy + gh + 8), MON3[m - 1], f_syne(12 * S, 700),
                  INK if cur else DIM, anchor="ma")
-        text((gx, qy + qh - 44), f"{MON3[mon - 1]} {rtxt}", f_num(22 * S, 700),
-             MINT if up else RED)
-        if ret is not None and ret == max(rows.values()):
-            text((gx + gw, qy + qh - 42), f"best month of {year}", f_syne(14 * S, 700),
-                 MINT, anchor="ra")
+        if yr_rows.get(str(mon)) == max(yr_rows.values()):
+            text((gx, qy + qh - 32), f"best month of {year}", f_syne(15 * S, 700), MINT)
 
     # -------------------------------------------------------- 6. stat strip
     sy, sh = qy + qh + GAP, SH_
