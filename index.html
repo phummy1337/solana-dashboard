@@ -286,6 +286,17 @@
     .news-time { display: none; }
   }
 
+  /* monthly seasonality grid */
+  .stable { border-collapse: collapse; font-size: 12.5px; width: 100%;
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-variant-numeric: tabular-nums; }
+  .stable th { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+               color: var(--mute); padding: 5px 4px; text-align: center; font-family: Syne, sans-serif; }
+  .stable th.yr, .stable td.yr { text-align: left; color: var(--ink); font-weight: 700; padding-left: 2px; }
+  .stable td { padding: 5px 4px; text-align: center; font-weight: 600; border-radius: 4px; white-space: nowrap; }
+  .stable tr.sep td, .stable tr.sep th { border-top: 1px solid var(--line); }
+  .stable tr.agg td, .stable tr.agg th.yr { font-weight: 800; color: var(--ink); }
+  .stable td.na { color: rgba(143,165,212,0.35); }
+
   .ytable a.plink { color: var(--peri); text-decoration: none; border-bottom: 1px dotted rgba(143,165,212,0.45); }
   .ytable a.plink:hover { color: var(--ink); border-bottom-color: var(--orange); }
   .ytable tr.apyx td { background: rgba(249,115,22,0.07); border-top-color: rgba(249,115,22,0.35); }
@@ -512,6 +523,16 @@
 <div class="shead"><h2>Trending on Solana</h2><span class="rule"></span><span class="asof" id="newsAsOf"></span></div>
 <section class="grid">
   <div class="panel" style="grid-column: 1 / -1;"><div id="newsList"></div></div>
+</section>
+
+<!-- ------------------------------------------------- SOL monthly seasonality -->
+<div class="shead"><h2>SOL Monthly Returns Since Inception</h2><span class="rule"></span>
+  <button class="tgl" id="seasonDl" title="Download as PNG">⤓ PNG</button></div>
+<section class="grid">
+  <div class="panel" style="grid-column: 1 / -1;">
+    <div style="overflow-x:auto"><table class="stable" id="seasonTable"></table></div>
+    <div class="note" id="seasonNote" style="margin-top:11px"></div>
+  </div>
 </section>
 
 <footer>
@@ -792,6 +813,18 @@ const CHAINS = [
 ];
 /* The stablecoin card compares issuers on Solana rather than chains, so it
    carries its own series list; makeTrendCard uses `t.series` when present. */
+const PRICE_ASSETS = [
+  { key: 'Solana',      name: 'SOL',   color: '#14F195', width: 2.4 },
+  { key: 'Bitcoin',     name: 'BTC',   color: '#F7931A', width: 1.6 },
+  { key: 'Ethereum',    name: 'ETH',   color: '#8FA5D4', width: 1.4 },
+  { key: 'BNB',         name: 'BNB',   color: '#F0B90B', width: 1.3 },
+  { key: 'Avalanche',   name: 'AVAX',  color: '#E84142', width: 1.3 },
+  { key: 'Sui',         name: 'SUI',   color: '#38BDF8', width: 1.3 },
+  { key: 'Tron',        name: 'TRX',   color: '#FB923C', width: 1.3 },
+  { key: 'Polygon',     name: 'POL',   color: '#E879F9', width: 1.3 },
+  { key: 'Arbitrum',    name: 'ARB',   color: '#A855F7', width: 1.3 },
+  { key: 'Hyperliquid', name: 'HYPE',  color: '#0EA5A0', width: 1.3 },
+];
 const STABLES = [
   { key: 'Total', name: 'All stablecoins', color: '#14F195', width: 2.2 },
   { key: 'USDC',  name: 'USDC',            color: '#2775CA', width: 1.4 },
@@ -804,7 +837,21 @@ const STABLES = [
 const tps = v => v == null || isNaN(v) ? '—'
   : v >= 100 ? Math.round(v).toLocaleString()
   : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+const pct1 = v => v == null || !isFinite(v) ? '—' : v.toFixed(1) + '%';
+const num1 = v => v == null || !isFinite(v) ? '—' : v.toFixed(1);
 const TRENDS = [
+  { key: 'price_perf', compare: 'price_perf', title: 'Price Performance vs Peers',
+    color: '#14F195', fmt: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%', agg: 'last',
+    series: PRICE_ASSETS, solKey: 'Solana', rebase: true,
+    tip: '<b>In simple terms:</b> every asset starts at 0% on the left edge of whatever window you pick, so the lines show percentage gain or loss from that same starting point — the only fair way to compare a $77,000 coin with a $0.72 one.<br><br><b>Why it matters:</b> it answers whether SOL is outperforming the majors and its direct L1/L2 competitors over your chosen horizon, rather than just moving with the whole market. Data covers the last year (CoinGecko free tier).' },
+  { key: 'rev', compare: 'rev', title: 'Real Economic Value (REV)', color: '#14F195', fmt: usd, agg: 'sum',
+    tip: '<b>In simple terms:</b> the total amount users actually pay to use a chain each day — transaction fees plus tips to validators. It is the closest thing a blockchain has to revenue.<br><br><b>Why it matters:</b> supply, TVL and transaction counts can all be inflated cheaply; REV cannot, because someone has to part with real money. It is the cleanest read on genuine demand for blockspace.' },
+  { key: 'rev_share', compare: 'rev_share', title: 'Share of Cross-Chain REV', color: '#F97316', fmt: pct1, agg: 'mean',
+    tip: '<b>In simple terms:</b> of every dollar users spent on blockspace across these ten chains that day, this is the slice each one captured.<br><br><b>Why it matters:</b> absolute REV rises and falls with the whole market, so share shows who is actually winning demand. A chain gaining share is taking real paying activity from the others.' },
+  { key: 'active_addresses', compare: 'active_addresses', title: 'Active Addresses', color: '#38BDF8', fmt: compact, agg: 'mean',
+    tip: '<b>In simple terms:</b> how many distinct wallets transacted on each chain that day.<br><br><b>Why it matters:</b> the broadest measure of reach — how many people (and bots) actually show up. Read it next to REV: many addresses paying little means cheap, accessible activity; few addresses paying a lot means expensive blockspace.' },
+  { key: 'tx_per_address', compare: 'tx_per_address', title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
+    tip: '<b>In simple terms:</b> successful transactions divided by active wallets — how intensively the average wallet uses a chain each day.<br><br><b>Why it matters:</b> it separates chains people visit from chains people <i>use</i>. A high number means wallets transacting repeatedly, the pattern behind trading, payments and apps rather than one-off transfers. Automated traders lift this on the busiest chains.' },
   { key: 'ytd_transactions',        compare: 'transactions',      title: 'Transactions',      color: '#38BDF8', fmt: compact, agg: 'sum',
     variants: [
       { id: 'total', label: 'Total', compare: 'transactions', fmt: compact, agg: 'sum' },
@@ -1132,7 +1179,8 @@ function makeTrendCard(t) {
   const cutoff = range === '1d' ? null : trendCutoff(range);
   // Per-card scale; comparisons default to log (the chains span magnitudes).
   const scale = state.trendScales[t.key] || (cmp ? 'log' : 'lin');
-  const logScale = scale === 'log';
+  // Rebased series cross zero and go negative, which a log axis cannot plot.
+  const logScale = scale === 'log' && !t.rebase;
   const smooth = !!state.trendSmooth[t.key] && range !== '1d';
   const period = range === '1d' ? 'd' : (state.trendAggs[orig.key] || 'd');
   const aggMode = t.agg || 'sum';
@@ -1238,14 +1286,23 @@ function makeTrendCard(t) {
       let out = aggregateSeries(pts, period, aggMode);
       if (t.perSecond) out = out.map(p => ({ d: p.d, v: p.v / 86400 }));
       if (smooth) out = ma7(out);
-      return clip(out);
+      out = clip(out);
+      // Rebase after clipping so every asset starts at 0% for the visible
+      // window — prices spanning $0.72 to $77,000 share no other axis.
+      if (t.rebase && out.length) {
+        const base = out[0].v;
+        out = base ? out.map(p => ({ d: p.d, v: (p.v / base - 1) * 100 })) : out;
+      }
+      return out;
     };
     const hiddenSet = state.trendHidden[orig.key] || new Set();
     let datasets;
     if (cmp) {
       datasets = seriesList.filter(c => cmp[c.key]).map(c => ({
         label: c.name,
-        data: prep(cmp[c.key]).filter(p => p.v > 0).map(p => ({ x: p.d, y: p.v })),
+        // Dropping non-positives keeps a log axis valid, but rebased series
+        // legitimately sit at or below zero — never filter those.
+        data: prep(cmp[c.key]).filter(p => t.rebase || p.v > 0).map(p => ({ x: p.d, y: p.v })),
         borderColor: c.color, borderWidth: c.width, order: c.key === 'solana' ? 10 : 1,
         pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: false,
         hidden: hiddenSet.has(c.key),
@@ -1319,6 +1376,7 @@ async function loadData() {
     buildTrends();
     renderYield(d.yield_products);
     renderNews(d.news);
+    renderSeason(d.monthly_returns);
     renderMarquee(d.news);
 
     if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
@@ -1621,6 +1679,7 @@ function setScale(scale) {
   $('priceScale').value = state.scale;
 }
 $('priceDl').addEventListener('click', downloadPriceImage);
+$('seasonDl').addEventListener('click', downloadSeasonImage);
 function setPricePopup(open) {
   document.querySelector('.split-right').classList.toggle('fs-popup', open);
   $('fsBackdrop').style.display = open ? 'block' : 'none';
@@ -1799,6 +1858,137 @@ function renderNews(items) {
     list.appendChild(row);
   }
   $('newsAsOf').textContent = 'refreshed with the data · sources linked';
+}
+
+/* ------------------------------------------------- monthly seasonality grid */
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let seasonData = null;
+// green for gains, red for losses; opacity scales with magnitude (capped at 60%)
+const heatBg = v => v == null ? 'transparent'
+  : (v >= 0 ? `rgba(20,241,149,${Math.min(Math.abs(v) / 60, 1) * 0.5 + 0.05})`
+            : `rgba(255,107,107,${Math.min(Math.abs(v) / 60, 1) * 0.5 + 0.05})`);
+const cellTxt = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+
+function renderSeason(md) {
+  if (!md?.grid || !Object.keys(md.grid).length) return;
+  seasonData = md;
+  const years = Object.keys(md.grid).sort();
+  const t = $('seasonTable');
+  let html = '<thead><tr><th class="yr">Year</th>' +
+    MONTHS.map(m => `<th>${m}</th>`).join('') + '<th>Year</th></tr></thead><tbody>';
+  for (const y of years) {
+    const row = md.grid[y];
+    // compound the year's completed months
+    const yearVal = Object.values(row).reduce((a, v) => a * (1 + v / 100), 1);
+    const yv = Object.keys(row).length ? (yearVal - 1) * 100 : null;
+    html += `<tr><td class="yr">${y}</td>` + MONTHS.map((_, i) => {
+      const v = row[i + 1];
+      return v == null ? '<td class="na">—</td>'
+        : `<td style="background:${heatBg(v)}">${cellTxt(v)}</td>`;
+    }).join('') + `<td style="background:${heatBg(yv)}"><b>${cellTxt(yv)}</b></td></tr>`;
+  }
+  const st = md.stats || {};
+  const aggRow = (label, pick, cls) =>
+    `<tr class="agg ${cls}"><th class="yr">${label}</th>` + MONTHS.map((_, i) => {
+      const s = st[i + 1];
+      const v = s ? pick(s) : null;
+      return v == null ? '<td class="na">—</td>'
+        : `<td style="background:${heatBg(v)}">${cellTxt(v)}</td>`;
+    }).join('') + '<td class="na">—</td></tr>';
+  html += aggRow('Average', s => s.avg, 'sep') + aggRow('Median', s => s.med, '');
+  html += `<tr class="agg"><th class="yr">Positive</th>` + MONTHS.map((_, i) => {
+    const s = st[i + 1];
+    return s ? `<td>${s.pos}/${s.n}</td>` : '<td class="na">—</td>';
+  }).join('') + '<td class="na">—</td></tr></tbody>';
+  t.innerHTML = html;
+
+  const best = Object.entries(st).sort((a, b) => b[1].med - a[1].med)[0];
+  const worst = Object.entries(st).sort((a, b) => a[1].med - b[1].med)[0];
+  $('seasonNote').textContent =
+    `Monthly close-to-close returns since ${years[0]}. Strongest month by median: ` +
+    `${MONTHS[best[0] - 1]} (${cellTxt(best[1].med)}, positive ${best[1].pos} of ${best[1].n} years); ` +
+    `weakest: ${MONTHS[worst[0] - 1]} (${cellTxt(worst[1].med)}). ` +
+    `The current month is excluded until it closes. Past performance does not predict future returns.`;
+}
+
+/* Draws the grid as a branded PNG — the table is DOM, not a chart, so it gets
+   its own renderer rather than going through buildShareImage. */
+async function downloadSeasonImage() {
+  const md = seasonData;
+  if (!md) return;
+  const logo = await dfdvLogo();
+  const years = Object.keys(md.grid).sort();
+  const S = 2, PAD = 48, colW = 92, yrW = 86, rowH = 34, headH = 132;
+  const W = PAD * 2 + yrW + colW * 13;
+  const rows = years.length + 3;
+  const H = headH + (rows + 1) * rowH + 92;
+  const cv = document.createElement('canvas');
+  cv.width = W * S; cv.height = H * S;
+  const g = cv.getContext('2d');
+  g.scale(S, S);
+  const bg = g.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0A1633'); bg.addColorStop(1, '#030815');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+
+  g.fillStyle = '#F1F5FB'; g.font = '700 36px Syne, sans-serif';
+  g.fillText('SOL Monthly Returns Since Inception', PAD, 66);
+  g.fillStyle = '#8FA5D4'; g.font = '600 15px Syne, sans-serif';
+  g.fillText(`Close-to-close monthly performance, ${years[0]}–${years[years.length - 1]}`, PAD, 96);
+  if (logo) {
+    const lh = 24, lw = lh * logo.width / logo.height;
+    g.drawImage(logo, W - PAD - lw, 42, lw, lh);
+  }
+
+  const cellX = i => PAD + yrW + i * colW;
+  g.font = '700 14px Syne, sans-serif'; g.fillStyle = '#6B7FAB'; g.textAlign = 'center';
+  MONTHS.forEach((m, i) => g.fillText(m.toUpperCase(), cellX(i) + colW / 2, headH));
+  g.fillText('YEAR', cellX(12) + colW / 2, headH);
+  g.textAlign = 'left';
+  g.fillText('YEAR', PAD, headH);
+
+  const drawCell = (x, y, v, bold) => {
+    if (v == null) {
+      g.fillStyle = 'rgba(143,165,212,0.3)'; g.textAlign = 'center';
+      g.font = '600 15px ui-sans-serif, system-ui, sans-serif';
+      g.fillText('—', x + colW / 2, y + 22); return;
+    }
+    g.fillStyle = heatBg(v);
+    g.fillRect(x + 3, y + 3, colW - 6, rowH - 6);
+    g.fillStyle = '#F1F5FB'; g.textAlign = 'center';
+    g.font = (bold ? '800 ' : '600 ') + '15px ui-sans-serif, system-ui, sans-serif';
+    g.fillText(cellTxt(v), x + colW / 2, y + 22);
+  };
+
+  let y = headH + 14;
+  for (const yr of years) {
+    const row = md.grid[yr];
+    g.fillStyle = '#F1F5FB'; g.textAlign = 'left';
+    g.font = '700 16px ui-sans-serif, system-ui, sans-serif';
+    g.fillText(yr, PAD, y + 22);
+    MONTHS.forEach((_, i) => drawCell(cellX(i), y, row[i + 1] ?? null));
+    const compounded = Object.values(row).reduce((a, v) => a * (1 + v / 100), 1);
+    drawCell(cellX(12), y, Object.keys(row).length ? (compounded - 1) * 100 : null, true);
+    y += rowH;
+  }
+  g.strokeStyle = 'rgba(143,165,212,0.25)';
+  g.beginPath(); g.moveTo(PAD, y + 3); g.lineTo(W - PAD, y + 3); g.stroke();
+  y += 10;
+  for (const [label, pick] of [['Average', s => s.avg], ['Median', s => s.med]]) {
+    g.fillStyle = '#F1F5FB'; g.textAlign = 'left';
+    g.font = '800 16px ui-sans-serif, system-ui, sans-serif';
+    g.fillText(label, PAD, y + 22);
+    MONTHS.forEach((_, i) => drawCell(cellX(i), y, md.stats[i + 1] ? pick(md.stats[i + 1]) : null, true));
+    y += rowH;
+  }
+
+  const fy = H - 58;
+  g.strokeStyle = 'rgba(143,165,212,0.15)';
+  g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
+  g.textAlign = 'left'; g.fillStyle = '#6B7FAB'; g.font = '600 13px Syne, sans-serif';
+  g.fillText('State of Solana', PAD, fy + 32);
+  g.textAlign = 'right'; g.fillStyle = '#F97316'; g.font = '700 15px Syne, sans-serif';
+  g.fillText('Visit stateofsol.com →', W - PAD, fy + 33);
+  saveCanvas(cv, 'state-of-solana-monthly-returns.png');
 }
 
 /* ------------------------------------------------------------ uptime panel */

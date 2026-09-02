@@ -407,6 +407,21 @@ def main() -> int:
     compare: dict = {}
     since = f"{YEAR - 5}-01-01"
 
+    # A day still in progress reports a fraction of its true value, which draws
+    # a false cliff at the right edge — chains publish at different times, so
+    # exclude today outright rather than trusting each series' last point.
+    today_utc = datetime.now(timezone.utc).date().isoformat()
+
+    # Blockworks intermittently returns an empty array for a chain that
+    # normally has data (seen on stablecoin supply for ethereum/polygon).
+    # Carry the previous refresh's series forward so a card doesn't silently
+    # lose a chain — but only if it is still recent, and always warn.
+    prev_compare: dict = {}
+    try:
+        prev_compare = json.loads(OUT.read_text()).get("compare") or {}
+    except Exception:  # noqa: BLE001 - first run or unreadable
+        pass
+
     def compare_metric(slug: str, key: str, chains: list[str]) -> None:
         try:
             d = bw(f"v1/metrics/{slug}", project=",".join(chains))
@@ -414,15 +429,40 @@ def main() -> int:
             for chain in chains:
                 rows = d.get(chain) or []
                 pts = [{"d": r["date"], "v": r["value"]} for r in sorted(rows, key=lambda r: r["date"])
-                       if r.get("value") is not None and r["date"] >= since]
+                       if r.get("value") is not None and since <= r["date"] < today_utc]
                 if pts:
                     out[chain] = pts
             if out:
+                # Chains publish on their own schedules. A chain sitting ahead
+                # of the pack has written a day the others haven't finished —
+                # and that early value is a fraction of its true total, drawing
+                # a false cliff. Trim everything past the common frontier (the
+                # median of each chain's last date).
+                lasts = sorted(v[-1]["d"] for v in out.values())
+                frontier = lasts[len(lasts) // 2]
+                stale_cutoff = (date.fromisoformat(frontier) - timedelta(days=4)).isoformat()
+                for chain in chains:
+                    if chain in out:
+                        continue
+                    old = (prev_compare.get(key) or {}).get(chain) or []
+                    if old and old[-1]["d"] >= stale_cutoff:
+                        out[chain] = old
+                        warn(f"{slug}: empty for {chain}, reused previous series "
+                             f"(through {old[-1]['d']})")
+                for chain in list(out):
+                    out[chain] = [p for p in out[chain] if p["d"] <= frontier]
+                    if not out[chain]:
+                        del out[chain]
+            if out:
                 compare[key] = out
-                print(f"  compare {slug}: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+                print(f"  compare {slug}: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items())
+                      + f" (frontier {frontier})")
         except Exception as e:  # noqa: BLE001
             warn(f"compare {slug}: {e}")
 
+    compare_metric("rev-usd", "rev", CHAINS_ALL)
+    compare_metric("active-address-total", "active_addresses", CHAINS_ALL)
+    compare_metric("transaction-succeed-total", "succeeded", CHAINS_ALL)
     compare_metric("transaction-total", "transactions", CHAINS_ALL)
     compare_metric("dex-spot-volume-total-usd", "dex_volume", CHAINS_DEX)
     compare_metric("stablecoin-supply-total-usd", "stablecoin_supply", CHAINS_ALL)
@@ -738,6 +778,127 @@ def main() -> int:
     data["news"] = news[:34]
     mix = {s: sum(1 for x in data["news"] if x["s"] == s) for s in by_source}
     print(f"  news: keeping {len(data['news'])} · mix {mix}")
+
+    # ------------------------------------------------ cross-asset price series
+    # Blockworks prices only four of these tokens, so performance comes from
+    # CoinGecko. Free tier rate-limits hard (~6 calls before 429), hence the
+    # spacing and the carry-forward when a call still fails.
+    PRICE_ASSETS = [
+        ("Bitcoin", "bitcoin"), ("Solana", "solana"), ("Ethereum", "ethereum"),
+        ("BNB", "binancecoin"), ("Avalanche", "avalanche-2"), ("Sui", "sui"),
+        ("Tron", "tron"), ("Polygon", "polygon-ecosystem-token"),
+        ("Arbitrum", "arbitrum"), ("Hyperliquid", "hyperliquid"),
+    ]
+    perf: dict = {}
+    for i, (label, cg_id) in enumerate(PRICE_ASSETS):
+        try:
+            if i:
+                time.sleep(12)  # stay under CoinGecko's free-tier limiter
+            j = get(f"https://api.coingecko.com/api/v3/coins/{cg_id}"
+                    "/market_chart?vs_currency=usd&days=365&interval=daily")
+            pts = [{"d": datetime.fromtimestamp(t / 1000, tz=timezone.utc).date().isoformat(),
+                    "v": v} for t, v in (j.get("prices") or [])]
+            pts = [p for p in pts if p["d"] < today_utc]
+            if pts:
+                perf[label] = pts
+        except Exception as e:  # noqa: BLE001
+            old = (prev_compare.get("price_perf") or {}).get(label) or []
+            if old:
+                perf[label] = old
+                warn(f"price {label}: {e} — reused previous series")
+            else:
+                warn(f"price {label}: {e}")
+    if perf:
+        compare["price_perf"] = perf
+        print("  price performance: " + ", ".join(f"{k}:{len(v)}" for k, v in perf.items()))
+
+    # --------------------------------------------------- derived demand ratios
+    # Two composites Blockworks doesn't publish directly:
+    #   rev_share        — each chain's cut of that day's REV across the set,
+    #                      i.e. where blockspace demand actually pays out.
+    #   tx_per_address   — successful transactions per active address, a read
+    #                      on how intensively the average wallet uses a chain.
+    try:
+        rev_c = compare.get("rev") or {}
+        if rev_c:
+            by_day: dict = {}
+            for chain, pts in rev_c.items():
+                for p in pts:
+                    by_day.setdefault(p["d"], {})[chain] = p["v"]
+            share: dict = {}
+            for d0, vals in by_day.items():
+                tot = sum(v for v in vals.values() if v and v > 0)
+                if tot <= 0:
+                    continue
+                for chain, v in vals.items():
+                    if v and v > 0:
+                        share.setdefault(chain, []).append({"d": d0, "v": v / tot * 100})
+            for chain in share:
+                share[chain].sort(key=lambda p: p["d"])
+            if share:
+                compare["rev_share"] = share
+                print("  derived rev_share: " + ", ".join(f"{c}:{len(v)}" for c, v in share.items()))
+
+        succ_c, addr_c = compare.get("succeeded") or {}, compare.get("active_addresses") or {}
+        tpa: dict = {}
+        for chain, pts in succ_c.items():
+            addrs = {p["d"]: p["v"] for p in addr_c.get(chain, [])}
+            out = [{"d": p["d"], "v": p["v"] / addrs[p["d"]]}
+                   for p in pts if addrs.get(p["d"])]
+            if out:
+                tpa[chain] = out
+        if tpa:
+            compare["tx_per_address"] = tpa
+            print("  derived tx_per_address: " + ", ".join(f"{c}:{len(v)}" for c, v in tpa.items()))
+    except Exception as e:  # noqa: BLE001
+        warn(f"derived demand ratios: {e}")
+
+    # ------------------------------------------- SOL monthly return seasonality
+    # Calendar-month returns since inception: last close of month N versus last
+    # close of month N-1, so partial current months are excluded and every cell
+    # is a completed month.
+    try:
+        if prices:
+            month_close: dict = {}
+            for d0 in sorted(prices):
+                month_close[d0[:7]] = prices[d0]     # last close seen per month
+            latest_month = max(prices)[:7]
+            months = sorted(month_close)
+            grid: dict = {}
+            for i in range(1, len(months)):
+                m = months[i]
+                if m == latest_month:                # still in progress
+                    continue
+                prev_m = months[i - 1]
+                # only chain consecutive months, so a data gap can't fake a return
+                py, pm = int(prev_m[:4]), int(prev_m[5:])
+                if (py + (pm == 12), (pm % 12) + 1) != (int(m[:4]), int(m[5:])):
+                    continue
+                base = month_close[prev_m]
+                if base:
+                    grid.setdefault(m[:4], {})[int(m[5:])] = (month_close[m] / base - 1) * 100
+
+            def _median(xs: list[float]) -> float:
+                xs = sorted(xs)
+                n = len(xs)
+                return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+
+            stats_by_month: dict = {}
+            for mo in range(1, 13):
+                vals = [grid[y][mo] for y in grid if mo in grid[y]]
+                if vals:
+                    stats_by_month[mo] = {
+                        "avg": sum(vals) / len(vals),
+                        "med": _median(vals),
+                        "pos": sum(1 for v in vals if v > 0),
+                        "n": len(vals),
+                    }
+            data["monthly_returns"] = {"grid": grid, "stats": stats_by_month}
+            best = max(stats_by_month.items(), key=lambda kv: kv[1]["med"])
+            print(f"  monthly seasonality: {len(grid)} years, best median month "
+                  f"= {best[0]} ({best[1]['med']:+.1f}%)")
+    except Exception as e:  # noqa: BLE001
+        warn(f"monthly seasonality: {e}")
 
     data["compare"] = compare
     data["daily"] = daily
