@@ -286,6 +286,31 @@
   #newsList::-webkit-scrollbar { width: 8px; }
   #newsList::-webkit-scrollbar-thumb { background: rgba(143,165,212,0.3); border-radius: 99px; }
   #newsList::-webkit-scrollbar-track { background: transparent; }
+  /* monthly highlights: a tab per written-up month, newest first */
+  .hl-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .hl-tabs .yr { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+                 color: var(--mute); align-self: center; margin: 0 4px 0 0; }
+  .hl-note { font-size: 13.5px; font-weight: 600; color: var(--peri); line-height: 1.5;
+             padding: 13px 0 3px; border-bottom: 1px solid var(--line-2); }
+  .hl-row { display: flex; gap: 16px; padding: 15px 0; border-top: 1px solid var(--line-2); }
+  .hl-row:first-of-type { border-top: none; }
+  .hl-when { flex: none; width: 92px; padding-top: 2px; }
+  .hl-day { font-size: 13px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .hl-cat { display: inline-block; margin-top: 6px; font-size: 10px; font-weight: 700;
+            letter-spacing: .07em; text-transform: uppercase; }
+  .hl-body { flex: 1; min-width: 0; border-left: 2px solid; padding-left: 15px; }
+  .hl-t { font-size: 15.5px; font-weight: 700; color: var(--ink); line-height: 1.35; }
+  .hl-t a { color: inherit; text-decoration: none; }
+  .hl-t a:hover { color: var(--orange); }
+  .hl-b { font-size: 13.5px; font-weight: 600; color: var(--peri); line-height: 1.55; margin-top: 5px; }
+  .hl-src { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+            color: var(--mute); text-decoration: none; margin-top: 7px; display: inline-block; }
+  .hl-src:hover { color: var(--orange); }
+  @media (max-width: 640px) {
+    .hl-row { flex-direction: column; gap: 7px; }
+    .hl-when { width: auto; display: flex; align-items: baseline; gap: 10px; }
+    .hl-cat { margin-top: 0; }
+  }
   .news-row { display: flex; align-items: baseline; gap: 13px; padding: 10px 0; border-top: 1px solid var(--line-2); }
   .news-row:first-child { border-top: none; padding-top: 2px; }
   .news-src { flex: none; width: 108px; font-size: 10px; font-weight: 700; letter-spacing: .07em;
@@ -552,6 +577,16 @@
 <div class="shead"><h2>Trending on Solana</h2><span class="rule"></span><span class="asof" id="newsAsOf"></span></div>
 <section class="grid">
   <div class="panel" style="grid-column: 1 / -1;"><div id="newsList"></div></div>
+</section>
+
+<!-- ---------------------------------------------------- monthly highlights -->
+<div class="shead" id="hlHead"><h2>Monthly Highlights</h2><span class="rule"></span>
+  <span class="asof">hand-curated · sources linked</span></div>
+<section class="grid" id="hlSection">
+  <div class="panel" style="grid-column: 1 / -1;">
+    <div class="hl-tabs" id="hlTabs"></div>
+    <div id="hlBody"></div>
+  </div>
 </section>
 
 
@@ -2192,11 +2227,109 @@ function renderUptime() {
     `past 30 days · last outage ${fmtDate(last.date)} (${nf(days)} days ago)`;
 }
 
+/* ------------------------------------------------- monthly highlights tabs */
+const MONTH_FULL = ['January','February','March','April','May','June','July',
+                    'August','September','October','November','December'];
+
+function renderHighlights(h) {
+  const months = Object.keys(h?.months || {}).sort().reverse();
+  if (!months.length) {                       // nothing written up yet — hide it
+    $('hlHead').style.display = 'none';
+    $('hlSection').style.display = 'none';
+    return;
+  }
+  const tabs = $('hlTabs'), body = $('hlBody'), cats = h.cats || {};
+  tabs.textContent = '';
+  let year = null;
+  for (const m of months) {
+    if (m.slice(0, 4) !== year) {             // a year label ahead of its months
+      year = m.slice(0, 4);
+      const lab = document.createElement('span');
+      lab.className = 'yr';
+      lab.textContent = year;
+      tabs.appendChild(lab);
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tgl';
+    b.dataset.m = m;
+    b.textContent = MONTH_FULL[+m.slice(5) - 1];
+    b.addEventListener('click', () => show(m));
+    tabs.appendChild(b);
+  }
+
+  // Copy is first-party but built node by node anyway, matching renderNews.
+  function show(m) {
+    for (const b of tabs.querySelectorAll('button'))
+      b.setAttribute('aria-pressed', String(b.dataset.m === m));
+    body.textContent = '';
+    const rec = h.months[m] || {};
+    if (rec.note) {
+      const n = document.createElement('div');
+      n.className = 'hl-note';
+      n.textContent = rec.note;
+      body.appendChild(n);
+    }
+    for (const it of rec.items || []) {
+      const colour = cats[it.cat] || 'var(--peri)';
+      const row = document.createElement('div');
+      row.className = 'hl-row';
+
+      const when = document.createElement('div');
+      when.className = 'hl-when';
+      const day = document.createElement('div');
+      day.className = 'hl-day';
+      day.textContent = it.d.length > 7
+        ? `${+it.d.slice(8)} ${MONTHS[+it.d.slice(5, 7) - 1]}` : 'All month';
+      const cat = document.createElement('div');
+      cat.className = 'hl-cat';
+      cat.style.color = colour;
+      cat.textContent = it.cat || '';
+      when.append(day, cat);
+
+      const bd = document.createElement('div');
+      bd.className = 'hl-body';
+      bd.style.borderLeftColor = colour;
+      const t = document.createElement('div');
+      t.className = 'hl-t';
+      t.textContent = it.t;
+      bd.appendChild(t);
+      if (it.b) {
+        const p = document.createElement('div');
+        p.className = 'hl-b';
+        p.textContent = it.b;
+        bd.appendChild(p);
+      }
+      if (/^https:\/\//.test(it.u || '')) {
+        const a = document.createElement('a');
+        a.className = 'hl-src';
+        a.href = it.u; a.target = '_blank'; a.rel = 'noopener';
+        a.textContent = new URL(it.u).hostname.replace(/^www\./, '') + ' ↗';
+        bd.appendChild(a);
+      }
+      row.append(when, bd);
+      body.appendChild(row);
+    }
+  }
+  show(months[0]);
+}
+
+async function loadHighlights() {
+  try {
+    const r = await fetch('highlights.json', { cache: 'no-cache' });
+    if (!r.ok) throw new Error(`highlights.json HTTP ${r.status}`);
+    renderHighlights(await r.json());
+  } catch (e) {
+    console.warn('highlights.json load failed', e);
+    renderHighlights(null);
+  }
+}
+
 /* ------------------------------------------------------------------- boot */
 (async function boot() {
   renderUptime();
   renderUpgrades();
-  await Promise.all([loadData(), loadNetwork(), loadSupply()]);
+  await Promise.all([loadData(), loadNetwork(), loadSupply(), loadHighlights()]);
   await extendPriceSeries();
   tickSpotPrice();
   await loadValidators();

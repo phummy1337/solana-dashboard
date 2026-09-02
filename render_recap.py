@@ -59,36 +59,29 @@ TICKER = {"Solana": "SOL", "Bitcoin": "BTC", "Ethereum": "ETH", "BNB": "BNB",
           "Avalanche": "AVAX", "Sui": "SUI", "Tron": "TRX", "Polygon": "POL",
           "Arbitrum": "ARB", "Hyperliquid": "HYPE"}
 
-# The month's highlights, hand-curated: (date, category, headline, detail, accent).
-# Everything else on this card is computed from data.json — these are the one
-# exception, so they live here keyed by month and the section simply drops out
-# for a month nobody has written up.
-#
-# Only the headline is drawn. The detail is the evidence behind it and the copy
-# for the accompanying tweet, where there is room to read it.
-PERI = (143, 165, 212)
-DEVELOPMENTS = {
-    "2026-08": [
-        ("28 Aug", "Governance", "Double Disinflation passes",
-         "The first binding on-chain vote doubles the issuance decay to 30%/yr. "
-         "Terminal 1.5% now lands in H1 2029, about 18.9M fewer SOL minted.", MINT),
-        ("28 Aug", "Protocol", "Slot times reach 300ms",
-         "Two 50ms cuts shipped this month, 400 to 350 to 300ms at epoch 1024, "
-         "with 200ms already running on testnet.", MINT),
-        ("Aug", "Capital", "Best month yet for SOL ETFs",
-         "Over $174M of net inflows and the strongest week since launch. BSOL "
-         "became the first past $1B in assets, 96% of it staked.", PERI),
-        ("27 Aug", "Distribution", "Schwab to list spot SOL",
-         "39.8M accounts and $13T of client assets, alongside AVAX and LINK. "
-         "Announced for the coming months, not yet trading.", PERI),
-        ("4 Aug", "Payments", "Western Union card goes live",
-         "USDPT settles on Solana behind a Visa card issued across 37 markets "
-         "and accepted at 175M merchants.", ORANGE),
-        ("23 Aug", "Real assets", "Tokenized assets top $4B",
-         "A record for the network, holding roughly 64% of every tokenized-stock "
-         "deposit in DeFi and $1.2B of Treasuries.", ORANGE),
-    ],
-}
+def developments(ym: str) -> list[tuple]:
+    """The month's headlines, from the same highlights.json the dashboard reads.
+
+    Everything else on this card is computed from data.json; these are written
+    by hand. Only entries carrying a short "card" headline are drawn, so the
+    site can run a longer list than fits here, and a month nobody has written
+    up simply drops the section.
+    """
+    path = HERE / "highlights.json"
+    if not path.exists():
+        return []
+    h = json.loads(path.read_text())
+    cats = h.get("cats", {})
+    out = []
+    for it in h.get("months", {}).get(ym, {}).get("items", []):
+        if not it.get("card"):
+            continue
+        d = it["d"]
+        when = f"{int(d[8:])} {MON3[int(d[5:7]) - 1]}" if len(d) > 7 else MON3[int(d[5:7]) - 1]
+        hexc = cats.get(it.get("cat"), "#8FA5D4").lstrip("#")
+        colour = tuple(int(hexc[i:i + 2], 16) for i in (0, 2, 4))
+        out.append((when, it.get("cat", ""), it["card"], it.get("b", ""), colour))
+    return out
 
 _cache: dict = {}
 
@@ -233,7 +226,7 @@ def main() -> int:
 
     # Headlines only — three across, sized to whichever one needs two lines.
     # Chronological, with anything dated to the month as a whole ("Aug") last.
-    devs = sorted(DEVELOPMENTS.get(ym, []),
+    devs = sorted(developments(ym),
                   key=lambda e: int(e[0].split()[0]) if e[0][0].isdigit() else 99)[:6]
     DEV_CW = (W - PAD * 2 - 36 - 36) / 3
     dev_heads = [wrap(hd, f_syne(18 * S, 700), DEV_CW - 15, S)[:2] for _, _, hd, _, _ in devs]
