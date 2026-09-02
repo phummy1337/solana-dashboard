@@ -36,6 +36,16 @@ MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "N
 INK, MUTE, DIM = (241, 245, 251), (143, 165, 212), (107, 127, 171)
 MINT, RED, ORANGE = (20, 241, 149), (255, 107, 107), (249, 115, 22)
 PANEL, EDGE, SLATE = (13, 26, 52), (35, 52, 84), (60, 78, 120)
+CHAIN_COLOR = {"solana": (20, 241, 149), "ethereum": (143, 165, 212),
+               "base": (59, 130, 246), "arbitrum": (168, 85, 247),
+               "bnb": (240, 185, 11), "avalanche": (232, 65, 66),
+               "sui": (56, 189, 248), "tron": (251, 146, 60),
+               "hyperevm": (14, 165, 160), "polygon": (232, 121, 249)}
+ASSET_COLOR = {"Solana": (20, 241, 149), "Bitcoin": (247, 147, 26),
+               "Ethereum": (143, 165, 212), "BNB": (240, 185, 11),
+               "Avalanche": (232, 65, 66), "Sui": (56, 189, 248),
+               "Tron": (251, 146, 60), "Polygon": (232, 121, 249),
+               "Arbitrum": (168, 85, 247), "Hyperliquid": (14, 165, 160)}
 CHAIN_SHORT = {"solana": "SOL", "ethereum": "ETH", "base": "BASE",
                "arbitrum": "ARB", "bnb": "BNB", "avalanche": "AVAX",
                "sui": "SUI", "tron": "TRX", "hyperevm": "HYPE",
@@ -203,7 +213,7 @@ def main() -> int:
             hgt = max(3, span * abs(v) / mx)
             top_y = zero - hgt if v >= 0 else zero
             is_sol = asset == "Solana"
-            rect(bx, top_y, bw_, hgt, MINT if is_sol else (SLATE if v >= 0 else (128, 58, 64)))
+            rect(bx, top_y, bw_, hgt, ASSET_COLOR.get(asset, SLATE))
             text((bx + bw_ / 2, top_y - 18), pct(v), f_num(13 * S, 700),
                  MINT if is_sol else MUTE, anchor="ma")
             text((bx + bw_ / 2, gy + gh + 8), TICKER.get(asset, asset[:4]),
@@ -223,12 +233,22 @@ def main() -> int:
         by = ry + 58 + i * 96
         text((bx, by - 22), label, f_syne(15 * S, 700), INK)
         w = max(6, bw_ * val / peak)
-        rect(bx, by, w, bh, fill)
+        if i == 0:
+            rect(bx, by, w, bh, fill)
+        else:
+            # stack the rest so the bar shows who the "others" actually are
+            seg_x = bx
+            for ch, cv in sorted(((c, v) for c, v in tx.items() if c != "solana"),
+                                 key=lambda kv: -kv[1]):
+                sw_ = w * cv / (val or 1)
+                rect(seg_x, by, max(1, sw_), bh, CHAIN_COLOR.get(ch, SLATE))
+                seg_x += sw_
         vf = f_num(22 * S, 800)
         vw = wide(compact(val), vf)
-        inside = w > vw + 28
+        # never sit the value on the stacked bar — it crosses several colours
+        inside = i == 0 and w > vw + 28
         text((bx + w - vw - 12 if inside else bx + w + 12, by + 10), compact(val), vf,
-             (4, 30, 22) if inside else col)
+             (4, 30, 22) if inside else INK)
         text((bx, by + bh + 5), f"{val / month_secs:,.0f} TPS implied",
              f_num(14 * S, 600), MINT if i == 0 else DIM)
     if other_tx:
@@ -239,15 +259,16 @@ def main() -> int:
     panel(x2, ry, hw, rh, "Real economic value")
     top_rev = rev_rank[:4]
     other_rev = sum(v for _, v in rev_rank[4:])
-    rows = [(CHAIN_LABEL.get(ch, ch), v, ch == "solana") for ch, v in top_rev]
+    rows = [(CHAIN_LABEL.get(ch, ch), v, ch == "solana", CHAIN_COLOR.get(ch, SLATE))
+            for ch, v in top_rev]
     if other_rev:
-        rows.append((f"Other ({len(rev_rank) - 4})", other_rev, False))
-    pk = max(v for _, v, _ in rows) or 1
-    for i, (name, v, is_sol) in enumerate(rows):
+        rows.append((f"Other ({len(rev_rank) - 4})", other_rev, False, SLATE))
+    pk = max(v for _, v, _, _ in rows) or 1
+    for i, (name, v, is_sol, colr) in enumerate(rows):
         by = ry + 52 + i * 37
         text((x2 + 18, by + 3), name, f_syne(14 * S, 700), INK if is_sol else MUTE)
         bx2, bw2 = x2 + 132, hw - 300
-        rect(bx2, by + 2, max(4, bw2 * v / pk), 20, MINT if is_sol else SLATE)
+        rect(bx2, by + 2, max(4, bw2 * v / pk), 20, colr)
         text((x2 + hw - 76, by + 3), compact(v, "$"), f_num(15 * S, 700),
              INK if is_sol else MUTE, anchor="ra")
         text((x2 + hw - 18, by + 3), f"{v / rev_total * 100:.0f}%", f_num(14 * S, 600),
@@ -270,9 +291,9 @@ def main() -> int:
             bxx = gx + i * slot + (slot - bw2) / 2
             hgt = max(3, gh * v / mxd)
             is_sol = ch == "solana"
-            rect(bxx, gy + gh - hgt, bw2, hgt, MINT if is_sol else SLATE)
+            rect(bxx, gy + gh - hgt, bw2, hgt, CHAIN_COLOR.get(ch, SLATE))
             text((bxx + bw2 / 2, gy + gh - hgt - 18), compact(v, "$"), f_num(12 * S, 700),
-                 MINT if is_sol else MUTE, anchor="ma")
+                 MINT if is_sol else (211, 219, 234), anchor="ma")
             text((bxx + bw2 / 2, gy + gh + 8), CHAIN_SHORT.get(ch, ch[:4].upper()),
                  f_syne(12 * S, 700), INK if is_sol else DIM, anchor="ma")
         share = dex_rank[0][1] / (sum(dex.values()) or 1) * 100
