@@ -63,6 +63,9 @@ TICKER = {"Solana": "SOL", "Bitcoin": "BTC", "Ethereum": "ETH", "BNB": "BNB",
 # Everything else on this card is computed from data.json — these are the one
 # exception, so they live here keyed by month and the section simply drops out
 # for a month nobody has written up.
+#
+# Only the headline is drawn. The detail is the evidence behind it and the copy
+# for the accompanying tweet, where there is room to read it.
 PERI = (143, 165, 212)
 DEVELOPMENTS = {
     "2026-08": [
@@ -128,6 +131,28 @@ def compact(n: float | None, prefix: str = "") -> str:
 
 def pct(v: float) -> str:
     return f"{'+' if v >= 0 else ''}{v:.1f}%"
+
+
+def ordinal(n: int) -> str:
+    return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+# Widths have to be known before the canvas exists, to size the card.
+_MEAS = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+
+
+def wrap(s: str, f: ImageFont.FreeTypeFont, maxw: float, scale: int = 1) -> list[str]:
+    lines, cur = [], ""
+    for word in s.split():
+        trial = f"{cur} {word}".strip()
+        if cur and _MEAS.textlength(trial, font=f) / scale > maxw:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        lines.append(cur)
+    return lines
 
 
 def main() -> int:
@@ -206,9 +231,12 @@ def main() -> int:
     PY_, PH_, RH_, QH_, SH_, GAP = 132, 246, 268, 244, 104, 16
     W, S, PAD = 1200, 2, 56
 
+    # Headlines only — three across, sized to whichever one needs two lines.
     devs = DEVELOPMENTS.get(ym, [])[:6]
-    DEV_ROW = 116                                    # one highlight, tag to detail
-    DH_ = (46 + DEV_ROW * ((len(devs) + 2) // 3) + 10 + GAP) if devs else 0
+    DEV_CW = (W - PAD * 2 - 36 - 36) / 3
+    dev_heads = [wrap(hd, f_syne(17 * S, 700), DEV_CW - 15, S)[:2] for _, _, hd, _, _ in devs]
+    DEV_ROW = 24 + 23 * max((len(h) for h in dev_heads), default=1) + 10
+    DH_ = (46 + DEV_ROW * ((len(devs) + 2) // 3) + 6 + GAP) if devs else 0
 
     H = PY_ + DH_ + PH_ + GAP + RH_ + GAP + QH_ + GAP + SH_ + 74
 
@@ -236,18 +264,6 @@ def main() -> int:
         """Half-strength colour: the peers stay legible, Solana stays loud."""
         return tuple(int(PANEL[i] + (c[i] - PANEL[i]) * a) for i in range(3))
 
-    def wrap(s, f, maxw):
-        lines, cur = [], ""
-        for word in s.split():
-            trial = f"{cur} {word}".strip()
-            if cur and wide(trial, f) > maxw:
-                lines.append(cur)
-                cur = word
-            else:
-                cur = trial
-        if cur:
-            lines.append(cur)
-        return lines
 
     # ---------------------------------------------------------------- header
     text((PAD, 34), "StateOfSOL.com", f_syne(15 * S, 700), MUTE)
@@ -261,36 +277,42 @@ def main() -> int:
     # ------------------------------------------------- 0. the month's headlines
     if devs:
         panel(PAD, PY_, W - PAD * 2, DH_ - GAP, f"Top developments · {MONTHS[mon - 1]}")
-        cw = (W - PAD * 2 - 36 - 36) / 3
-        hf, bf, tf = f_syne(17 * S, 700), f_num(13 * S, 500), f_syne(11 * S, 700)
-        for i, (when, cat, head, body, col) in enumerate(devs):
-            cx = PAD + 18 + (i % 3) * (cw + 18)
+        hf, tf = f_syne(17 * S, 700), f_syne(11 * S, 700)
+        for i, (when, cat, _head, _body, col) in enumerate(devs):
+            cx = PAD + 18 + (i % 3) * (DEV_CW + 18)
             cy = PY_ + 46 + (i // 3) * DEV_ROW
-            rect(cx, cy, 3, DEV_ROW - 18, col)               # accent rule
+            rect(cx, cy, 3, DEV_ROW - 16, col)               # accent rule
             tx0, ty = cx + 15, cy
             text((tx0, ty), f"{when} · {cat}".upper(), tf, col)
             ty += 20
-            for ln in wrap(head, hf, cw - 15)[:2]:
+            for ln in dev_heads[i]:
                 text((tx0, ty), ln, hf, INK)
                 ty += 23
-            ty += 4
-            for ln in wrap(body, bf, cw - 15)[:3]:
-                text((tx0, ty), ln, bf, MUTE)
-                ty += 17
 
     # ------------------------- 1. SOL vs peers: the month's return, ranked
     py, ph = PY_ + DH_, PH_
     panel(PAD, py, W - PAD * 2, ph, f"{MONTHS[mon - 1]} price performance vs peers")
     if sol_ret is not None:
         up = sol_ret >= 0
-        rf = f_num(50 * S, 800)
-        text((PAD + 18, py + 46), pct(sol_ret), rf, MINT if up else RED)
-        if sol_open and sol_close:
-            text((PAD + 18, py + 106), f"${sol_open:,.2f} → ${sol_close:,.2f}",
-                 f_num(17 * S, 600), (211, 219, 234))
         rank = [a for a, _ in perf_rank].index("Solana") + 1
-        text((PAD + 18, py + 132), f"#{rank} of {len(perf_rank)} assets",
-             f_syne(15 * S, 700), MINT if rank <= 3 else MUTE)
+        # (text, font, colour, advance to the next line)
+        col = [(pct(sol_ret), f_num(50 * S, 800), MINT if up else RED, 60)]
+        if sol_open and sol_close:
+            col.append((f"${sol_open:,.2f} → ${sol_close:,.2f}", f_num(17 * S, 600),
+                        (211, 219, 234), 26))
+        col.append((f"{ordinal(rank)} best of {len(perf_rank)} majors", f_syne(15 * S, 700),
+                    MINT if rank <= 3 else MUTE, 34))
+        ref = [f"{TICKER[a]} {pct(perf[a])}" for a in ("Bitcoin", "Ethereum") if a in perf]
+        if ref:
+            col.append(("  ·  ".join(ref), f_num(14 * S, 600), MUTE, 22))
+        aug = [p["v"] for p in sol_pts if p["d"][:7] == ym]
+        if aug:
+            col.append((f"Daily closes ${min(aug):,.0f} – ${max(aug):,.0f}",
+                        f_num(14 * S, 600), MUTE, 0))
+        ty = py + 40 + (ph - 40 - (sum(a for *_, a in col) + 19)) / 2
+        for s, f, c, adv in col:
+            text((PAD + 18, ty), s, f, c)
+            ty += adv
 
     if perf_rank:
         gx, gw = PAD + 250, W - PAD * 2 - 268
