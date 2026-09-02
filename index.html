@@ -1154,7 +1154,12 @@ async function buildTrendImage(key, title, fmt, el) {
   const chart = trendCharts[key];
   if (!chart) return null;
   let items;
-  if (chart.config.type === 'bar') {
+  if (chart.config.type === 'bar' && chart.data.datasets.length > 1) {
+    // grouped bars: one dataset per series, labelled by its latest value
+    items = chart.data.datasets.filter(d => !d.hidden).map(d => ({
+      label: d.label, color: d.borderColor,
+      val: [...d.data].reverse().find(v => v != null) }));
+  } else if (chart.config.type === 'bar') {
     const ds = chart.data.datasets[0];
     items = chart.data.labels.map((l, i) => ({
       label: l, color: Array.isArray(ds.borderColor) ? ds.borderColor[i] : ds.borderColor,
@@ -1407,6 +1412,50 @@ function makeTrendCard(t) {
 
   // Restate the date as the last point actually drawn — trimming partial
   // periods can pull it back from the raw series' tail.
+  // Per-period returns are discrete quantities, so draw them as grouped bars
+  // rather than a line through a handful of points (a single visible period
+  // left a line chart with nothing to render at all).
+  if (t.rebase && period !== 'd' && cmp) {
+    const periodLabel = dstr => {
+      const dt = new Date(dstr + 'T00:00:00Z');
+      const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()];
+      if (period === 'y') return String(dt.getUTCFullYear());
+      if (period === 'q') return `Q${Math.floor(dt.getUTCMonth() / 3) + 1} ${dt.getUTCFullYear()}`;
+      if (period === 'w') return `${mo} ${dt.getUTCDate()}`;
+      return `${mo} ${dt.getUTCFullYear()}`;
+    };
+    const labels = [...new Set(datasets.flatMap(ds => ds.data.map(p => p.x)))].sort();
+    const barSets = datasets.map(ds => {
+      const by = Object.fromEntries(ds.data.map(p => [p.x, p.y]));
+      return { label: ds.label, data: labels.map(l => by[l] ?? null),
+               backgroundColor: ds.borderColor, borderColor: ds.borderColor,
+               borderWidth: 0, borderRadius: 3, hidden: ds.hidden };
+    });
+    const noteEl = el.querySelector('.note');
+    if (labels.length)
+      noteEl.textContent = `Latest · ${fmtDate(labels[labels.length - 1])}` +
+                           (noteEl.dataset.tail || '');
+    trendCharts[t.key] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: labels.map(periodLabel), datasets: barSets },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { grid: { display: false }, border: { display: false },
+               ticks: { font: { size: 11 }, maxRotation: 0 } },
+          y: { grid: gridCfg, border: { display: false },
+               ticks: { maxTicksLimit: 6, font: { size: 10 }, callback: v => t.fmt(v) } },
+        },
+        plugins: { legend: { display: false },
+                   tooltip: { ...tooltipCfg, displayColors: true, usePointStyle: true,
+                     boxWidth: 7, boxHeight: 7, boxPadding: 3,
+                     callbacks: { label: c => ` ${c.dataset.label}  ${t.fmt(c.parsed.y)}` } } },
+      },
+    });
+    return el;
+  }
+
   const plotted = datasets.flatMap(ds => ds.data).map(p => p.x).sort();
   if (plotted.length) {
     const noteEl = el.querySelector('.note');
