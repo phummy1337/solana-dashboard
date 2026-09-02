@@ -859,15 +859,24 @@ def main() -> int:
     # is a completed month.
     try:
         if prices:
+            import calendar as _cal
             month_close: dict = {}
+            month_last_day: dict = {}
             for d0 in sorted(prices):
                 month_close[d0[:7]] = prices[d0]     # last close seen per month
-            latest_month = max(prices)[:7]
+                month_last_day[d0[:7]] = d0
+            # A month counts only once it has actually closed — i.e. we hold a
+            # price for its final calendar day. Keying off "latest month in the
+            # data" instead would drop a finished month whenever the upstream
+            # series lags a day or two behind today.
+            def _complete(m: str) -> bool:
+                y, mo = int(m[:4]), int(m[5:])
+                return month_last_day[m][8:] == f"{_cal.monthrange(y, mo)[1]:02d}"
             months = sorted(month_close)
             grid: dict = {}
             for i in range(1, len(months)):
                 m = months[i]
-                if m == latest_month:                # still in progress
+                if not _complete(m):                 # still in progress
                     continue
                 prev_m = months[i - 1]
                 # only chain consecutive months, so a data gap can't fake a return
