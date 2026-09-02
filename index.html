@@ -168,6 +168,17 @@
     .split-right .stage .wrap { aspect-ratio: 2 / 1; height: auto; min-height: 280px; max-height: none; }
   }
   /* Expanded price chart: centered popup over a dimmed backdrop */
+  /* enlarged trend card: the real panel is moved in, so all its controls,
+     chart instance and state come with it */
+  #cardModal { display: none; position: fixed; inset: 4vh 5vw; z-index: 1000;
+               background: linear-gradient(180deg, #0A1633 0%, #060E26 60%, #030815 100%);
+               border: 1px solid var(--line); border-radius: 16px; padding: 10px 18px 18px;
+               overflow: auto; box-shadow: 0 24px 80px rgba(0,0,0,0.6); }
+  #cardModal .panel { border: none; background: none; padding: 8px 4px; }
+  #cardModal .leg { font-size: 13px; }
+  #cardModalClose { position: sticky; top: 0; float: right; z-index: 2; }
+  #trendGrid .spark { cursor: zoom-in; }
+  @media (max-width: 760px) { #cardModal { inset: 2vh 2vw; padding: 8px 10px 14px; } }
   #fsBackdrop { display: none; position: fixed; inset: 0; z-index: 999;
                 background: rgba(2, 5, 14, 0.72); backdrop-filter: blur(2px); }
   .split-right.fs-popup {
@@ -315,6 +326,7 @@
   .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .leg { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: #D3DBEA; }
   .leg .sw { width: 15px; height: 5px; border-radius: 2px; flex: none; }
+  #trendGrid .leg { font-size: 10px; }
 
   footer { display: flex; flex-direction: column; gap: 7px;
            padding: 26px 48px 26px; border-top: 1px solid var(--line-2); margin-top: 26px; }
@@ -440,6 +452,7 @@
 <section class="grid" id="trendGrid"></section>
 
 <div id="fsBackdrop"></div>
+<div id="cardModal" role="dialog" aria-modal="true"><button class="tgl" id="cardModalClose">✕ Close</button><div id="cardModalBody"></div></div>
 
 <!-- ------------------------------------------------- SOL monthly seasonality -->
 <div class="shead"><h2>SOL Monthly Returns Since Inception</h2><span class="rule"></span>
@@ -1247,6 +1260,11 @@ function makeTrendCard(t) {
   // alone — say what the lines are
   el.querySelector('[data-cdl]').addEventListener('click', () =>
     downloadTrendImage(orig.key, t.title + (cmp ? ' by Chain' : ''), t.fmt, el, range));
+  // Click the plot area to enlarge; ignore clicks on controls and legend.
+  el.querySelector('.spark').addEventListener('click', e => {
+    if (e.target.closest('button, select, a, .uinfo')) return;
+    openCardModal(el);
+  });
   const canvas = el.querySelector('canvas');
 
   if (range === '1d') {
@@ -1312,12 +1330,15 @@ function makeTrendCard(t) {
         const ds = datasets.find(d => d.label === name);
         return ds?.data[ds.data.length - 1]?.y;
       };
-      el.querySelector('.legend').innerHTML = seriesList.filter(c => cmp[c.key]).map(c => {
-        const v = lastOf(c.name);
-        return `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
+      // Rank by the value currently plotted, so the order re-sorts whenever
+      // the range or aggregation changes. Series with no value sink last.
+      const ranked = seriesList.filter(c => cmp[c.key])
+        .map(c => ({ c, v: lastOf(c.name) }))
+        .sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity));
+      el.querySelector('.legend').innerHTML = ranked.map(({ c, v }) =>
+        `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
            <span class="sw" style="background:${c.color}"></span>${c.name}
-           <span class="v num">${v != null ? t.fmt(v) : '—'}</span></button>`;
-      }).join('');
+           <span class="v num">${v != null ? t.fmt(v) : '—'}</span></button>`).join('');
       el.querySelectorAll('.legend .leg').forEach(b => b.addEventListener('click', () => {
         const s = state.trendHidden[orig.key] ??= new Set();
         s.has(b.dataset.chain) ? s.delete(b.dataset.chain) : s.add(b.dataset.chain);
@@ -1859,6 +1880,44 @@ function renderNews(items) {
   }
   $('newsAsOf').textContent = 'refreshed with the data · sources linked';
 }
+
+
+/* ------------------------------------------------- enlarge a trend card */
+// The panel itself is moved into the modal (not cloned), so its Chart
+// instance, listeners and current settings all come along. A placeholder
+// marks where to put it back — and makeTrendCard may swap the element while
+// it is open, so closing re-reads whatever panel is in the modal now.
+let cardModalHome = null;
+function openCardModal(panel) {
+  if (cardModalHome) return;
+  const holder = document.createElement('div');
+  panel.replaceWith(holder);
+  cardModalHome = holder;
+  $('cardModalBody').appendChild(panel);
+  // size the plot explicitly — cheaper than fighting the grid's own
+  // #trendGrid .spark rules through the cascade
+  const sp = panel.querySelector('.spark');
+  if (sp) sp.style.height = Math.max(320, Math.min(Math.round(innerHeight * 0.62), 720)) + 'px';
+  $('cardModal').style.display = 'block';
+  $('fsBackdrop').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => Object.values(trendCharts).forEach(c => c.resize()), 60);
+}
+function closeCardModal() {
+  if (!cardModalHome) return;
+  const panel = $('cardModalBody').firstElementChild;
+  const sp = panel?.querySelector('.spark');
+  if (sp) sp.style.height = '';
+  if (panel) cardModalHome.replaceWith(panel); else cardModalHome.remove();
+  cardModalHome = null;
+  $('cardModal').style.display = 'none';
+  $('fsBackdrop').style.display = 'none';
+  document.body.style.overflow = '';
+  setTimeout(() => Object.values(trendCharts).forEach(c => c.resize()), 60);
+}
+$('cardModalClose').addEventListener('click', closeCardModal);
+$('fsBackdrop').addEventListener('click', closeCardModal);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCardModal(); });
 
 /* ------------------------------------------------- monthly seasonality grid */
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
