@@ -144,6 +144,29 @@ def main() -> int:
     sol_pts = cmp_.get("price_perf", {}).get("Solana", [])
     sol_open, sol_close = last_in(sol_pts, prev), last_in(sol_pts, ym)
 
+    # The site's seasonality grid runs on Blockworks prices, which sit ~1% off
+    # CoinGecko at any given month boundary. Reading the year's bars out of it
+    # would print two different Augusts on the same card, so rebuild the bars
+    # from the very series the headline and the peer ranking use.
+    def year_returns(pts, yr):
+        close, last_day = {}, {}
+        for p in pts:
+            close[p["d"][:7]], last_day[p["d"][:7]] = p["v"], p["d"]
+        out = {}
+        for m, v in close.items():
+            y, mo = int(m[:4]), int(m[5:])
+            if y != yr or last_day[m][8:] != f"{calendar.monthrange(y, mo)[1]:02d}":
+                continue                                  # wrong year, or still open
+            base = close.get(f"{y - 1}-12" if mo == 1 else f"{y}-{mo - 1:02d}")
+            if base:
+                out[str(mo)] = (v / base - 1) * 100
+        return out
+
+    # CoinGecko's free tier only reaches back 365 days; fall back to the grid if
+    # that window somehow misses the month being recapped.
+    cg_rows = year_returns(sol_pts, year)
+    year_rows = cg_rows if str(mon) in cg_rows else grid.get(str(year), {})
+
     tx = month_total("transactions")
     sol_tx, other_tx = tx.get("solana", 0), sum(v for c, v in tx.items() if c != "solana")
     rev = month_total("rev")
@@ -302,7 +325,7 @@ def main() -> int:
                  f_syne(15 * S, 700), MINT)
 
     panel(x2, qy, hw, qh, f"SOL monthly return · {year}")
-    yr_rows = grid.get(str(year), {})
+    yr_rows = year_rows
     months = sorted(int(k) for k in yr_rows)
     if months:
         mx = max(abs(yr_rows[str(m)]) for m in months) or 1
