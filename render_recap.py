@@ -59,6 +59,34 @@ TICKER = {"Solana": "SOL", "Bitcoin": "BTC", "Ethereum": "ETH", "BNB": "BNB",
           "Avalanche": "AVAX", "Sui": "SUI", "Tron": "TRX", "Polygon": "POL",
           "Arbitrum": "ARB", "Hyperliquid": "HYPE"}
 
+# The month's highlights, hand-curated: (date, category, headline, detail, accent).
+# Everything else on this card is computed from data.json — these are the one
+# exception, so they live here keyed by month and the section simply drops out
+# for a month nobody has written up.
+PERI = (143, 165, 212)
+DEVELOPMENTS = {
+    "2026-08": [
+        ("28 Aug", "Governance", "Double Disinflation passes",
+         "The first binding on-chain vote doubles the issuance decay to 30%/yr. "
+         "Terminal 1.5% now lands in H1 2029, about 18.9M fewer SOL minted.", MINT),
+        ("28 Aug", "Protocol", "Slot times reach 300ms",
+         "Two 50ms cuts shipped this month, 400 to 350 to 300ms at epoch 1024, "
+         "with 200ms already running on testnet.", MINT),
+        ("Aug", "Capital", "Best month yet for SOL ETFs",
+         "Over $174M of net inflows and the strongest week since launch. BSOL "
+         "became the first past $1B in assets, 96% of it staked.", PERI),
+        ("27 Aug", "Distribution", "Schwab to list spot SOL",
+         "39.8M accounts and $13T of client assets, alongside AVAX and LINK. "
+         "Announced for the coming months, not yet trading.", PERI),
+        ("4 Aug", "Payments", "Western Union card goes live",
+         "USDPT settles on Solana behind a Visa card issued across 37 markets "
+         "and accepted at 175M merchants.", ORANGE),
+        ("23 Aug", "Real assets", "Tokenized assets top $4B",
+         "A record for the network, holding roughly 64% of every tokenized-stock "
+         "deposit in DeFi and $1.2B of Treasuries.", ORANGE),
+    ],
+}
+
 _cache: dict = {}
 
 
@@ -177,7 +205,12 @@ def main() -> int:
 
     PY_, PH_, RH_, QH_, SH_, GAP = 132, 246, 268, 244, 104, 16
     W, S, PAD = 1200, 2, 56
-    H = PY_ + PH_ + GAP + RH_ + GAP + QH_ + GAP + SH_ + 74
+
+    devs = DEVELOPMENTS.get(ym, [])[:6]
+    DEV_ROW = 116                                    # one highlight, tag to detail
+    DH_ = (46 + DEV_ROW * ((len(devs) + 2) // 3) + 10 + GAP) if devs else 0
+
+    H = PY_ + DH_ + PH_ + GAP + RH_ + GAP + QH_ + GAP + SH_ + 74
 
     img = Image.new("RGB", (W * S, H * S), "#030815")
     d = ImageDraw.Draw(img)
@@ -199,6 +232,23 @@ def main() -> int:
     def rect(x, y, w, h, fill):
         d.rectangle([(x * S, y * S), ((x + w) * S, (y + h) * S)], fill=fill)
 
+    def fade(c, a=0.5):
+        """Half-strength colour: the peers stay legible, Solana stays loud."""
+        return tuple(int(PANEL[i] + (c[i] - PANEL[i]) * a) for i in range(3))
+
+    def wrap(s, f, maxw):
+        lines, cur = [], ""
+        for word in s.split():
+            trial = f"{cur} {word}".strip()
+            if cur and wide(trial, f) > maxw:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = trial
+        if cur:
+            lines.append(cur)
+        return lines
+
     # ---------------------------------------------------------------- header
     text((PAD, 34), "STATE OF SOLANA · MONTHLY RECAP", f_syne(15 * S, 700), MUTE)
     text((PAD, 60), f"{MONTHS[mon - 1]} {year}", f_syne(46 * S, 700), INK)
@@ -207,8 +257,28 @@ def main() -> int:
     logo = logo.resize((int(lh * logo.width / logo.height), lh), Image.LANCZOS)
     img.paste(logo, ((W - PAD) * S - logo.width, 36 * S), logo)
 
+    # ------------------------------------------------- 0. the month's headlines
+    if devs:
+        panel(PAD, PY_, W - PAD * 2, DH_ - GAP, f"Top developments · {MONTHS[mon - 1]}")
+        cw = (W - PAD * 2 - 36 - 36) / 3
+        hf, bf, tf = f_syne(17 * S, 700), f_num(13 * S, 500), f_syne(11 * S, 700)
+        for i, (when, cat, head, body, col) in enumerate(devs):
+            cx = PAD + 18 + (i % 3) * (cw + 18)
+            cy = PY_ + 46 + (i // 3) * DEV_ROW
+            rect(cx, cy, 3, DEV_ROW - 18, col)               # accent rule
+            tx0, ty = cx + 15, cy
+            text((tx0, ty), f"{when} · {cat}".upper(), tf, col)
+            ty += 20
+            for ln in wrap(head, hf, cw - 15)[:2]:
+                text((tx0, ty), ln, hf, INK)
+                ty += 23
+            ty += 4
+            for ln in wrap(body, bf, cw - 15)[:3]:
+                text((tx0, ty), ln, bf, MUTE)
+                ty += 17
+
     # ------------------------- 1. SOL vs peers: the month's return, ranked
-    py, ph = PY_, PH_
+    py, ph = PY_ + DH_, PH_
     panel(PAD, py, W - PAD * 2, ph, f"{MONTHS[mon - 1]} price performance vs peers")
     if sol_ret is not None:
         up = sol_ret >= 0
@@ -236,7 +306,8 @@ def main() -> int:
             hgt = max(3, span * abs(v) / mx)
             top_y = zero - hgt if v >= 0 else zero
             is_sol = asset == "Solana"
-            rect(bx, top_y, bw_, hgt, ASSET_COLOR.get(asset, SLATE))
+            ac = ASSET_COLOR.get(asset, SLATE)
+            rect(bx, top_y, bw_, hgt, ac if is_sol else fade(ac))
             text((bx + bw_ / 2, top_y - 18), pct(v), f_num(13 * S, 700),
                  MINT if is_sol else MUTE, anchor="ma")
             text((bx + bw_ / 2, gy + gh + 8), TICKER.get(asset, asset[:4]),
@@ -264,7 +335,7 @@ def main() -> int:
             for ch, cv in sorted(((c, v) for c, v in tx.items() if c != "solana"),
                                  key=lambda kv: -kv[1]):
                 sw_ = w * cv / (val or 1)
-                rect(seg_x, by, max(1, sw_), bh, CHAIN_COLOR.get(ch, SLATE))
+                rect(seg_x, by, max(1, sw_), bh, fade(CHAIN_COLOR.get(ch, SLATE)))
                 seg_x += sw_
         vf = f_num(22 * S, 800)
         vw = wide(compact(val), vf)
@@ -291,7 +362,7 @@ def main() -> int:
         by = ry + 52 + i * 37
         text((x2 + 18, by + 3), name, f_syne(14 * S, 700), INK if is_sol else MUTE)
         bx2, bw2 = x2 + 132, hw - 300
-        rect(bx2, by + 2, max(4, bw2 * v / pk), 20, colr)
+        rect(bx2, by + 2, max(4, bw2 * v / pk), 20, colr if is_sol else fade(colr))
         text((x2 + hw - 76, by + 3), compact(v, "$"), f_num(15 * S, 700),
              INK if is_sol else MUTE, anchor="ra")
         text((x2 + hw - 18, by + 3), f"{v / rev_total * 100:.0f}%", f_num(14 * S, 600),
@@ -314,7 +385,8 @@ def main() -> int:
             bxx = gx + i * slot + (slot - bw2) / 2
             hgt = max(3, gh * v / mxd)
             is_sol = ch == "solana"
-            rect(bxx, gy + gh - hgt, bw2, hgt, CHAIN_COLOR.get(ch, SLATE))
+            cc = CHAIN_COLOR.get(ch, SLATE)
+            rect(bxx, gy + gh - hgt, bw2, hgt, cc if is_sol else fade(cc))
             text((bxx + bw2 / 2, gy + gh - hgt - 18), compact(v, "$"), f_num(12 * S, 700),
                  MINT if is_sol else (211, 219, 234), anchor="ma")
             text((bxx + bw2 / 2, gy + gh + 8), CHAIN_SHORT.get(ch, ch[:4].upper()),
