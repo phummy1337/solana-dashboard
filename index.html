@@ -200,7 +200,8 @@
   #trendGrid .spark.tall { height: 300px; }
 
   /* Activity Trends: fixed two-across so the comparison charts get room. */
-  #trendGrid { grid-template-columns: repeat(2, 1fr); }
+  #trendGrid { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 1400px) { #trendGrid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 900px) { #trendGrid { grid-template-columns: 1fr; } }
   .trend-ctl { display: flex; flex-wrap: wrap; gap: 6px; }
   .trend-ctl .tgl { padding: 5px 11px; font-size: 12px; }
@@ -853,28 +854,26 @@ const TRENDS = [
     tip: '<b>In simple terms:</b> how many distinct wallets transacted on each chain that day.<br><br><b>Why it matters:</b> the broadest measure of reach — how many people (and bots) actually show up. Read it next to REV: many addresses paying little means cheap, accessible activity; few addresses paying a lot means expensive blockspace.' },
   { key: 'tx_per_address', compare: 'tx_per_address', title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
     tip: '<b>In simple terms:</b> successful transactions divided by active wallets — how intensively the average wallet uses a chain each day.<br><br><b>Why it matters:</b> it separates chains people visit from chains people <i>use</i>. A high number means wallets transacting repeatedly, the pattern behind trading, payments and apps rather than one-off transfers. Automated traders lift this on the busiest chains.' },
-  { key: 'ytd_transactions',        compare: 'transactions',      title: 'Transactions',      color: '#38BDF8', fmt: compact, agg: 'sum',
-    variants: [
-      { id: 'total', label: 'Total', compare: 'transactions', fmt: compact, agg: 'sum' },
-      // Average transactions per second: the bucket's MEAN daily count over
-      // 86,400. Taking the mean (not the sum) is what makes this correct at
-      // every aggregation level, including a partial current week or month.
-      { id: 'tps', label: 'TPS', compare: 'transactions', fmt: tps, agg: 'mean',
-        perSecond: true, title: 'Transactions per Second',
-        noteUnit: ' · average transactions per second' },
-    ] },
+  { key: 'ytd_transactions', compare: 'transactions', title: 'Transactions', color: '#38BDF8', fmt: compact, agg: 'sum' },
+  // Average transactions per second: the bucket's MEAN daily count over 86,400.
+  // Taking the mean (not the sum) keeps this correct at every aggregation
+  // level, including a partial current week or month.
+  { key: 'tps_card', compare: 'transactions', title: 'Transactions per Second',
+    color: '#38BDF8', fmt: tps, agg: 'mean', perSecond: true,
+    noteUnit: ' · average transactions per second',
+    tip: '<b>In simple terms:</b> the average number of transactions each chain settles per second, worked out from its daily count.<br><br><b>Why it matters:</b> it is the plainest read on raw throughput — how much traffic a network actually carries, rather than how much it claims it could.' },
   { key: 'ytd_dex_volume',          compare: 'dex_volume',        title: 'Spot DEX Volume',   color: '#14F195', fmt: usd, agg: 'sum' },
   { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply', color: '#E9469A', fmt: usd, agg: 'last' },
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',          color: '#4ADE80', fmt: usd, agg: 'last' },
   { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd, agg: 'sum' },
-  { key: 'fsr_card', title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact,
-    tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are.<br><br><b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD.<br><br><b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.',
-    agg: 'mean',
-    variants: [
-      { id: 'fsr', label: 'FSR',        compare: 'fsr',        fmt: compact },
-      { id: 'fee', label: 'Median Fee', compare: 'fee_median', fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)) },
-      { id: 'vol', label: 'Fee Volatility', compare: 'fee_vol', fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)) },
-    ] },
+  { key: 'fsr_card', compare: 'fsr', title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact, agg: 'mean',
+    tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are.<br><br><b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD.<br><br><b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.' },
+  { key: 'fee_median_card', compare: 'fee_median', title: 'Median Transaction Fee', color: '#EAB308',
+    fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)), agg: 'mean',
+    tip: '<b>In simple terms:</b> what the middle transaction costs that day — half cost less, half cost more. The median is used rather than the average so a handful of enormous transactions cannot skew it.<br><br><b>Why it matters:</b> this is the number a normal user actually feels. Cheap, predictable fees are what let payments, gaming and high-frequency apps work at all.' },
+  { key: 'fee_vol_card', compare: 'fee_vol', title: 'Median Fee Volatility', color: '#EF4444',
+    fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)), agg: 'mean',
+    tip: '<b>In simple terms:</b> how much the median fee swings around — the 30-day rolling standard deviation of a chain&rsquo;s daily median fee, in dollars.<br><br><b>Why it matters:</b> a low fee is only useful if it stays low. High volatility means costs spike without warning, which is what makes budgeting for on-chain activity difficult.' },
 ];
 const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y'];
 const TREND_AGGS = [['d', 'Daily'], ['w', 'Weekly'], ['m', 'Monthly'], ['q', 'Quarterly'], ['y', 'Yearly']];
