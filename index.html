@@ -459,17 +459,6 @@
 <div id="fsBackdrop"></div>
 <div id="cardModal" role="dialog" aria-modal="true"><button class="tgl" id="cardModalClose">✕ Close</button><div id="cardModalBody"></div></div>
 
-<!-- ----------------------------------------------------- monthly recap card -->
-<div class="shead"><h2 id="recapTitle">Monthly Recap</h2><span class="rule"></span>
-  <button class="tgl" id="recapDl" title="Download the recap image">⤓ PNG</button></div>
-<section class="grid">
-  <div class="panel" style="grid-column: 1 / -1;">
-    <img id="recapPreview" alt="Monthly Solana recap card"
-         style="width:100%;max-width:900px;display:block;margin:0 auto;border-radius:12px">
-    <div class="note" id="recapNote" style="margin-top:11px"></div>
-  </div>
-</section>
-
 <!-- ------------------------------------------------- SOL monthly seasonality -->
 <div class="shead"><h2>SOL Monthly Returns Since Inception</h2><span class="rule"></span>
   <button class="tgl" id="seasonDl" title="Download as PNG">⤓ PNG</button></div>
@@ -1426,7 +1415,6 @@ async function loadData() {
     renderYield(d.yield_products);
     renderNews(d.news);
     renderSeason(d.monthly_returns);
-    renderRecap(d);
     renderMarquee(d.news);
 
     if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
@@ -1730,7 +1718,6 @@ function setScale(scale) {
 }
 $('priceDl').addEventListener('click', downloadPriceImage);
 $('seasonDl').addEventListener('click', downloadSeasonImage);
-$('recapDl').addEventListener('click', () => recapCanvas && saveCanvas(recapCanvas, recapFileName));
 function setPricePopup(open) {
   document.querySelector('.split-right').classList.toggle('fs-popup', open);
   $('fsBackdrop').style.display = open ? 'block' : 'none';
@@ -1949,171 +1936,6 @@ $('cardModalClose').addEventListener('click', closeCardModal);
 $('fsBackdrop').addEventListener('click', closeCardModal);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCardModal(); });
 
-
-/* ------------------------------------------------------- monthly recap card
-   A shareable summary of the last complete month, built from the same series
-   the dashboard already loads, so it re-generates itself every month. */
-let recapCanvas = null, recapFileName = 'solana-monthly-recap.png';
-const MONTH_FULL = ['January','February','March','April','May','June','July',
-                    'August','September','October','November','December'];
-
-function recapFigures(d) {
-  const c = d.compare || {};
-  const px = Object.fromEntries((d.series?.price || []).map(p => [p.d, p.v]));
-  const grid = d.monthly_returns?.grid || {};
-  // latest month that actually closed, per the seasonality grid
-  let ym = null;
-  for (const y of Object.keys(grid).sort())
-    for (const m of Object.keys(grid[y]).map(Number).sort((a, b) => a - b))
-      ym = `${y}-${String(m).padStart(2, '0')}`;
-  if (!ym) return null;
-  const [Y, M] = [+ym.slice(0, 4), +ym.slice(5)];
-  const prev = M === 1 ? `${Y - 1}-12` : `${Y}-${String(M - 1).padStart(2, '0')}`;
-
-  const agg = (key, how, chain = 'solana') => {
-    const pts = (c[key] || {})[chain] || [];
-    const pick = m => pts.filter(p => p.d.slice(0, 7) === m).map(p => p.v);
-    const roll = a => !a.length ? null
-      : how === 'sum' ? a.reduce((x, y) => x + y, 0)
-      : how === 'mean' ? a.reduce((x, y) => x + y, 0) / a.length
-      : a[a.length - 1];
-    return [roll(pick(ym)), roll(pick(prev))];
-  };
-
-  const closes = Object.keys(px).filter(k => k.slice(0, 7) === ym).sort();
-  const prevCloses = Object.keys(px).filter(k => k.slice(0, 7) === prev).sort();
-  const revAll = Object.fromEntries(Object.entries(c.rev || {}).map(([ch, pts]) =>
-    [ch, pts.filter(p => p.d.slice(0, 7) === ym).reduce((a, p) => a + p.v, 0)]));
-  const revTot = Object.values(revAll).reduce((a, b) => a + b, 0);
-  const revRank = Object.entries(revAll).sort((a, b) => b[1] - a[1]);
-  const solRankIdx = revRank.findIndex(([ch]) => ch === 'solana');
-
-  return {
-    ym, label: `${MONTH_FULL[M - 1]} ${Y}`,
-    ret: grid[String(Y)]?.[M] ?? null,
-    closeStart: prevCloses.length ? px[prevCloses[prevCloses.length - 1]] : null,
-    closeEnd: closes.length ? px[closes[closes.length - 1]] : null,
-    rev: agg('rev', 'sum'), txns: agg('transactions', 'sum'),
-    dex: agg('dex_volume', 'sum'), tvl: agg('defi_tvl', 'last'),
-    addrs: agg('active_addresses', 'mean'), fee: agg('fee_median', 'mean'),
-    tps: agg('transactions', 'mean'),
-    revRankIdx: solRankIdx, revShare: revTot ? revAll.solana / revTot * 100 : null,
-    revRunnerUp: revRank[solRankIdx === 0 ? 1 : 0] || null,
-    chains: revRank.length,
-  };
-}
-
-async function renderRecap(d) {
-  const f = recapFigures(d);
-  if (!f) return;
-  $('recapTitle').textContent = `Monthly Recap — ${f.label}`;
-  recapFileName = `solana-recap-${f.ym}.png`;
-  const logo = await dfdvLogo();
-  const S = 2, W = 1200, H = 750, PAD = 54;
-  const cv = document.createElement('canvas');
-  cv.width = W * S; cv.height = H * S;
-  const g = cv.getContext('2d');
-  g.scale(S, S);
-  const bg = g.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, '#0A1633'); bg.addColorStop(1, '#030815');
-  g.fillStyle = bg; g.fillRect(0, 0, W, H);
-
-  // header
-  g.fillStyle = '#8FA5D4'; g.font = '700 15px Syne, sans-serif';
-  g.fillText('STATE OF SOLANA · MONTHLY RECAP', PAD, 52);
-  g.fillStyle = '#F1F5FB'; g.font = '700 46px Syne, sans-serif';
-  g.fillText(f.label, PAD, 100);
-  if (logo) {
-    const lh = 26, lw = lh * logo.width / logo.height;
-    g.drawImage(logo, W - PAD - lw, 34, lw, lh);
-  }
-
-  // hero: the month's price move
-  const up = (f.ret ?? 0) >= 0;
-  g.fillStyle = up ? '#14F195' : '#FF6B6B';
-  g.font = '800 74px Syne, sans-serif';
-  const retTxt = f.ret == null ? '—' : (up ? '+' : '') + f.ret.toFixed(1) + '%';
-  g.fillText(retTxt, PAD, 186);
-  const retW = g.measureText(retTxt).width;
-  g.fillStyle = '#8FA5D4'; g.font = '600 19px Syne, sans-serif';
-  g.fillText('SOL price', PAD + retW + 20, 165);
-  g.fillStyle = '#D3DBEA'; g.font = '600 19px ui-sans-serif, system-ui, sans-serif';
-  if (f.closeStart && f.closeEnd)
-    g.fillText(`${price(f.closeStart)} → ${price(f.closeEnd)}`, PAD + retW + 20, 190);
-
-  // rank banner
-  if (f.revRankIdx === 0) {
-    g.fillStyle = 'rgba(20,241,149,0.10)';
-    g.fillRect(PAD, 212, W - PAD * 2, 46);
-    g.fillStyle = '#14F195'; g.font = '700 20px Syne, sans-serif';
-    g.fillText(`#1 of ${f.chains} chains in Real Economic Value`, PAD + 18, 242);
-    if (f.revShare != null) {
-      g.fillStyle = '#8FA5D4'; g.font = '600 17px Syne, sans-serif';
-      const t2 = `${f.revShare.toFixed(1)}% of all blockspace revenue`;
-      g.fillText(t2, W - PAD - 18 - g.measureText(t2).width, 242);
-    }
-  }
-
-  // six stat tiles
-  const mom = ([a, b]) => (a && b) ? ((a / b - 1) * 100) : null;
-  const tiles = [
-    ['Real Economic Value', usd(f.rev[0]), mom(f.rev)],
-    ['Transactions',        compact(f.txns[0]), mom(f.txns)],
-    ['DEX Volume',          usd(f.dex[0]), mom(f.dex)],
-    ['DeFi TVL (month end)',usd(f.tvl[0]), mom(f.tvl)],
-    ['Active Addresses /day', compact(f.addrs[0]), mom(f.addrs)],
-    ['Median Fee',          f.fee[0] == null ? '—' : '$' + f.fee[0].toFixed(5), mom(f.fee), true],
-  ];
-  const tw = (W - PAD * 2 - 24) / 3, th = 108;
-  tiles.forEach(([label, val, delta, lowerIsBetter], i) => {
-    const x = PAD + (i % 3) * (tw + 12), y = 284 + Math.floor(i / 3) * (th + 12);
-    g.fillStyle = 'rgba(13,26,52,0.75)';
-    g.fillRect(x, y, tw, th);
-    g.strokeStyle = 'rgba(143,165,212,0.16)'; g.lineWidth = 1;
-    g.strokeRect(x + 0.5, y + 0.5, tw - 1, th - 1);
-    g.fillStyle = '#6B7FAB'; g.font = '700 12px Syne, sans-serif';
-    g.fillText(label.toUpperCase(), x + 16, y + 28);
-    g.fillStyle = '#F1F5FB'; g.font = '700 30px ui-sans-serif, system-ui, sans-serif';
-    g.fillText(val, x + 16, y + 66);
-    if (delta != null) {
-      const good = lowerIsBetter ? delta < 0 : delta >= 0;
-      g.fillStyle = good ? '#14F195' : '#FF6B6B';
-      g.font = '700 15px ui-sans-serif, system-ui, sans-serif';
-      g.fillText(`${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta).toFixed(1)}% vs prior month`, x + 16, y + 92);
-    }
-  });
-
-  // highlights: facts the data can prove on its own, so this stays honest
-  // month to month without hand-editing.
-  const hi = [];
-  const yearRows = (d.monthly_returns?.grid || {})[f.ym.slice(0, 4)] || {};
-  const rets = Object.values(yearRows);
-  if (f.ret != null && rets.length > 1 && f.ret === Math.max(...rets))
-    hi.push(`Best month of ${f.ym.slice(0, 4)} for SOL`);
-  const outageInMonth = OUTAGES.some(o => o.date.slice(0, 7) === f.ym);
-  if (!outageInMonth) hi.push('100% network uptime');
-  if (f.tps[0]) hi.push(`${nf(f.tps[0] / 86400)} avg TPS`);
-  if (hi.length) {
-    g.fillStyle = '#8FA5D4'; g.font = '600 17px Syne, sans-serif';
-    g.fillText(hi.join('   ·   '), PAD, 596);
-  }
-
-  // footer
-  const fy = H - 62;
-  g.strokeStyle = 'rgba(143,165,212,0.15)';
-  g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
-  g.fillStyle = '#6B7FAB'; g.font = '600 14px Syne, sans-serif';
-  g.fillText('Data: Blockworks · DefiLlama · CoinGecko', PAD, fy + 34);
-  g.fillStyle = '#F97316'; g.font = '700 17px Syne, sans-serif';
-  const cta = 'stateofsol.com';
-  g.fillText(cta, W - PAD - g.measureText(cta).width, fy + 34);
-
-  recapCanvas = cv;
-  $('recapPreview').src = cv.toDataURL('image/png');
-  $('recapNote').textContent =
-    `Auto-generated from the latest complete month. Month-over-month changes compare ` +
-    `${f.label} with the month before. Click ⤓ PNG to download for sharing.`;
-}
 
 /* ------------------------------------------------- monthly seasonality grid */
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
