@@ -232,7 +232,9 @@ def main() -> int:
     W, S, PAD = 1200, 2, 56
 
     # Headlines only — three across, sized to whichever one needs two lines.
-    devs = DEVELOPMENTS.get(ym, [])[:6]
+    # Chronological, with anything dated to the month as a whole ("Aug") last.
+    devs = sorted(DEVELOPMENTS.get(ym, []),
+                  key=lambda e: int(e[0].split()[0]) if e[0][0].isdigit() else 99)[:6]
     DEV_CW = (W - PAD * 2 - 36 - 36) / 3
     dev_heads = [wrap(hd, f_syne(17 * S, 700), DEV_CW - 15, S)[:2] for _, _, hd, _, _ in devs]
     DEV_ROW = 24 + 23 * max((len(h) for h in dev_heads), default=1) + 10
