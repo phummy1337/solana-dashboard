@@ -250,8 +250,9 @@ def main() -> int:
         return lines
 
     # ---------------------------------------------------------------- header
-    text((PAD, 34), "STATE OF SOLANA · MONTHLY RECAP", f_syne(15 * S, 700), MUTE)
-    text((PAD, 60), f"{MONTHS[mon - 1]} {year}", f_syne(46 * S, 700), INK)
+    text((PAD, 34), "StateOfSOL.com", f_syne(15 * S, 700), MUTE)
+    # 42, not 46: the long title has to clear the logo, which starts at x≈814
+    text((PAD, 60), f"{MONTHS[mon - 1]} {year} Ecosystem Recap", f_syne(42 * S, 700), INK)
     logo = Image.open(HERE / "dfdv-logo.png").convert("RGBA")
     lh = 28 * S
     logo = logo.resize((int(lh * logo.width / logo.height), lh), Image.LANCZOS)
