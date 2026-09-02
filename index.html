@@ -219,6 +219,7 @@
   .crow { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
   .trend-ctl.small { gap: 3px; }
   .trend-ctl.small .tgl { padding: 2px 7px; font-size: 10px; border-radius: 9px; }
+  .modegrp { display: inline-flex; gap: 8px; flex: none; }
   .ctl-sep { width: 1px; height: 14px; background: var(--line); margin: 0 4px; align-self: center; }
   /* Export sits under its own chart, bottom-right, rather than crowding the
      header controls. Muted until hover so it reads as a utility, not a control. */
@@ -409,8 +410,10 @@
   <div class="split-left">
     <div class="shead">
       <h2 id="actTitle">Daily Snapshot</h2>
-      <button class="tgl" data-mode="daily" aria-pressed="true">Daily</button>
-      <button class="tgl" data-mode="ytd" aria-pressed="false">YTD</button>
+      <span class="modegrp">
+        <button class="tgl" data-mode="daily" aria-pressed="true">Daily</button>
+        <button class="tgl" data-mode="ytd" aria-pressed="false">YTD</button>
+      </span>
       <span class="rule"></span>
       <span class="asof" id="ytdAsOf"></span>
     </div>
@@ -855,7 +858,7 @@ const tps = v => v == null || isNaN(v) ? '—'
 const pct1 = v => v == null || !isFinite(v) ? '—' : v.toFixed(1) + '%';
 const num1 = v => v == null || !isFinite(v) ? '—' : v.toFixed(1);
 const TRENDS = [
-  { key: 'price_perf', compare: 'price_perf', title: 'Price Performance vs Peers',
+  { key: 'price_perf', compare: 'price_perf', title: 'Price Performance vs Peers', noSmooth: true,
     color: '#14F195', fmt: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%', agg: 'last',
     series: PRICE_ASSETS, solKey: 'Solana', rebase: true,
     tip: '<b>In simple terms:</b> every asset starts at 0% on the left edge of whatever window you pick, so the lines show percentage gain or loss from that same starting point — the only fair way to compare a $77,000 coin with a $0.72 one.<br><br><b>Why it matters:</b> it answers whether SOL is outperforming the majors and its direct L1/L2 competitors over your chosen horizon, rather than just moving with the whole market. Data covers the last year (CoinGecko free tier).' },
@@ -871,7 +874,7 @@ const TRENDS = [
   // Average transactions per second: the bucket's MEAN daily count over 86,400.
   // Taking the mean (not the sum) keeps this correct at every aggregation
   // level, including a partial current week or month.
-  { key: 'tps_card', compare: 'transactions', title: 'Transactions per Second',
+  { key: 'tps_card', compare: 'transactions', title: 'Transactions per Second', noSmooth: true,
     color: '#38BDF8', fmt: tps, agg: 'mean', perSecond: true,
     noteUnit: ' · average transactions per second',
     tip: '<b>In simple terms:</b> the average number of transactions each chain settles per second, worked out from its daily count.<br><br><b>Why it matters:</b> it is the plainest read on raw throughput — how much traffic a network actually carries, rather than how much it claims it could.' },
@@ -1223,8 +1226,8 @@ function makeTrendCard(t) {
         <select class="rsel" data-cscale-sel aria-label="Axis scale">
           <option value="lin"${logScale ? '' : ' selected'}>Linear</option>
           <option value="log"${logScale ? ' selected' : ''}>Log</option></select>
-        <span class="ctl-sep"></span>
-        <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button></span></div>
+        ${t.noSmooth ? '' : `<span class="ctl-sep"></span>
+        <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button>`}</span></div>
     ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
         `<button class="tgl" data-cvariant="${v.id}" aria-pressed="${v.id === variant.id}">${v.label}</button>`).join('')}</div>` : ''}
     <div class="note">Latest · ${fmtDate(last.d)}${noteTail}</div>
@@ -1246,7 +1249,7 @@ function makeTrendCard(t) {
     const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   });
-  el.querySelector('[data-csmooth]').addEventListener('click', () => {
+  el.querySelector('[data-csmooth]')?.addEventListener('click', () => {
     state.trendSmooth[t.key] = !state.trendSmooth[t.key];
     const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
