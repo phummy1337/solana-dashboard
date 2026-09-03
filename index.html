@@ -1297,7 +1297,7 @@ async function downloadPriceImage() {
       label: ds.label, color: ds.borderColor, val: ds.data[ds.data.length - 1]?.y }));
     await dfdvLogo();
     const cv = await buildShareImage(snapshotChart(priceChart), 'Levered SOL — DFDV vs SOL',
-      `weekly, rebased to ${fmtDate(state.dfdv.anchor)} · latest point is week to date`,
+      `${AGG_LABEL[state.agg]}, rebased to ${fmtDate(state.dfdv.anchor)} · latest point is to date`,
       items, pctSigned);
     if (cv) saveCanvas(cv, 'state-of-solana-levered-sol.png');
     return;
@@ -1832,15 +1832,25 @@ function drawLevered() {
 
   const lastD = dfdvSeries[dfdvSeries.length - 1].y, lastS = solSeries[solSeries.length - 1].y;
   const beta = lastS ? lastD / lastS : null;
+  // "outperformed by N×" only reads true when both legs are up. Two losses
+  // produce a positive ratio that would otherwise claim DFDV won while it
+  // actually fell harder, and opposite signs make the ratio meaningless.
+  const verdict = beta == null ? null
+    : lastD > 0 && lastS > 0
+      ? (beta >= 1 ? `DFDV has outperformed SOL by ${beta.toFixed(2)}×`
+                   : `DFDV has captured ${beta.toFixed(2)}× of SOL's move`)
+      : lastD < 0 && lastS < 0
+        ? `DFDV has fallen ${beta.toFixed(2)}× as far as SOL`
+        : 'DFDV and SOL have moved in opposite directions';
   const atBottom = anchor === base0;
   $('rbLegend').style.display = 'flex';
   $('rbLegend').innerHTML =
     `<span class="leg"><span class="sw" style="background:${DFDV_COLOR}"></span>DFDV <span class="v num">(${pctSigned(lastD)})</span></span>` +
     `<span class="leg"><span class="sw" style="background:${SOL_COLOR}"></span>SOL <span class="v num">(${pctSigned(lastS)})</span></span>` +
-    (beta ? `<span class="leg lev-note"><span class="v num">${beta.toFixed(2)}× SOL` +
+    (verdict ? `<span class="leg lev-note"><span class="v num">${verdict}` +
             ` · ${AGG_LABEL[state.agg]} from ${fmtDate(anchor)}` +
             `${atBottom ? ", SOL's 2026 bottom" : ''}` +
-            ` · both through ${fmtDate(through)}` +
+            ` · ${fmtDate(through)}` +
             `${src.intraday && through === lastDfdv ? ' (intraday)' : ''}` +
             `</span></span>` : '');
 }
