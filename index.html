@@ -377,6 +377,10 @@
   .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   .leg { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: #D3DBEA; }
   .leg .sw { width: 15px; height: 5px; border-radius: 2px; flex: none; }
+  /* forces its own row under the swatches: the levered caption is a sentence,
+     and reading it inline after two chips was hard work */
+  .leg.lev-note { flex-basis: 100%; justify-content: center; margin-top: 2px;
+                  color: var(--mute); }
   #trendGrid .leg { font-size: 11px; }
 
   footer { display: flex; flex-direction: column; gap: 7px;
@@ -1833,7 +1837,7 @@ function drawLevered() {
   $('rbLegend').innerHTML =
     `<span class="leg"><span class="sw" style="background:${DFDV_COLOR}"></span>DFDV <span class="v num">(${pctSigned(lastD)})</span></span>` +
     `<span class="leg"><span class="sw" style="background:${SOL_COLOR}"></span>SOL <span class="v num">(${pctSigned(lastS)})</span></span>` +
-    (beta ? `<span class="leg"><span class="v num">${beta.toFixed(2)}× SOL` +
+    (beta ? `<span class="leg lev-note"><span class="v num">${beta.toFixed(2)}× SOL` +
             ` · ${AGG_LABEL[state.agg]} from ${fmtDate(anchor)}` +
             `${atBottom ? ", SOL's 2026 bottom" : ''}` +
             ` · both through ${fmtDate(through)}` +
