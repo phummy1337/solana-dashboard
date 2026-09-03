@@ -1295,9 +1295,27 @@ async function downloadPriceImage() {
   if (state.levered) {
     const items = priceChart.data.datasets.map(ds => ({
       label: ds.label, color: ds.borderColor, val: ds.data[ds.data.length - 1]?.y }));
-    await dfdvLogo();
-    const cv = await buildShareImage(snapshotChart(priceChart), 'Levered SOL — DFDV vs SOL',
-      `${AGG_LABEL[state.agg]}, rebased to ${fmtDate(state.dfdv.anchor)} · latest point is to date`,
+    await dfdvLogo();                    // resolve first: the snapshot restores immediately
+    // Export-only axis: labels on the left and whole percentages. The card is
+    // read at a glance, where a tenth of a percent is noise, and the on-screen
+    // chart keeps the right-hand axis it shares with the price view.
+    // snapshotChart's update() rebuilds the per-scale objects, so the path has
+    // to be re-walked to write — a reference cached before the snapshot points
+    // at a detached object and the restore silently misses.
+    const yOpt = () => priceChart.options.scales.y;
+    const savedPos = yOpt().position;
+    yOpt().position = 'left';
+    yOpt().ticks.callback = v => `${v >= 0 ? '+' : ''}${Math.round(v)}%`;
+    let snap;
+    try {
+      snap = snapshotChart(priceChart);
+    } finally {
+      yOpt().position = savedPos;
+      drawPrice();                     // puts the live view's ticks back too
+    }
+    const cv = await buildShareImage(snap,
+      priceChart.$atBottom ? 'Since the SOL Bottom: DFDV vs. SOL' : 'DFDV vs. SOL',
+      `${AGG_LABEL[state.agg]}, rebased to ${fmtDate(priceChart.$leverAnchor)} · latest point is to date`,
       items, pctSigned);
     if (cv) saveCanvas(cv, 'state-of-solana-levered-sol.png');
     return;
@@ -1842,7 +1860,11 @@ function drawLevered() {
       : lastD < 0 && lastS < 0
         ? `DFDV has fallen ${beta.toFixed(2)}× as far as SOL`
         : 'DFDV and SOL have moved in opposite directions';
+  // The range selector re-anchors, so the export has to know which window it
+  // is actually looking at rather than assuming the configured anchor.
   const atBottom = anchor === base0;
+  priceChart.$leverAnchor = anchor;
+  priceChart.$atBottom = atBottom;
   $('rbLegend').style.display = 'flex';
   $('rbLegend').innerHTML =
     `<span class="leg"><span class="sw" style="background:${DFDV_COLOR}"></span>DFDV <span class="v num">(${pctSigned(lastD)})</span></span>` +
