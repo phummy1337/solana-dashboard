@@ -879,7 +879,10 @@ def main() -> int:
     # browser agent). Only what the overlay plots is kept — daily closes from
     # the anchor onwards, nothing earlier.
     try:
-        anchor = "2026-06-26"                        # treasury-strategy anchor
+        # SOL's 2026 low ($62.42 close) and its lowest since Dec 2023, so it is
+        # the natural base for "how much of the recovery did the levered
+        # instrument capture".
+        anchor = "2026-06-06"
         start = (date.fromisoformat(anchor) - timedelta(days=10)).isoformat()
         u = ("https://api.nasdaq.com/api/quote/DFDV/historical?assetclass=stocks"
              f"&fromdate={start}&todate={date.today().isoformat()}&limit=400")
@@ -889,7 +892,14 @@ def main() -> int:
         for r in rows:
             m, dd, y = r["date"].split("/")
             closes[f"{y}-{m}-{dd}"] = float(r["close"].replace("$", "").replace(",", ""))
-        pts = [{"d": k, "v": round(v, 4)} for k, v in sorted(closes.items()) if k >= anchor]
+        # The anchor is a SOL date and can land on a weekend, when DFDV has no
+        # close. Carry the last close at or before it so both sides are measured
+        # from the same moment — starting DFDV at the next trading day would
+        # hand SOL a free run of however many days the market was shut.
+        ordered = sorted(closes.items())
+        pre = [kv for kv in ordered if kv[0] <= anchor]
+        pts = [{"d": k, "v": round(v, 4)}
+               for k, v in (pre[-1:] if pre else []) + [kv for kv in ordered if kv[0] > anchor]]
         if len(pts) < 5:
             raise RuntimeError(f"only {len(pts)} closes since {anchor}")
         data["dfdv"] = {"anchor": anchor, "points": pts}

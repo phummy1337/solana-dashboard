@@ -129,8 +129,6 @@
   button.tgl:hover { color: var(--ink); border-color: rgba(143,165,212,0.4); }
   button.tgl[aria-pressed="true"] { color: #12100B; background: var(--orange); border-color: var(--orange); }
   button.tgl:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
-  button.tgl:disabled, select.rsel:disabled { opacity: 0.35; cursor: not-allowed; }
-  button.tgl:disabled:hover { color: var(--peri); border-color: var(--line); }
 
   .stage { padding: 14px 48px 0; }
   .stage .wrap { position: relative; height: 44vh; min-height: 320px; max-height: 460px; }
@@ -1759,30 +1757,40 @@ const DFDV_COLOR = '#F97316', SOL_COLOR = '#14F195';
    The last bucket is deliberately partial — it is the week so far. */
 function drawLevered() {
   const src = state.dfdv;
-  const anchor = src?.anchor;
-  const dfdvPts = (src?.points || []).map(p => ({ x: p.d, y: p.v }));
+  const base0 = src?.anchor;
+  const allDfdv = (src?.points || []).map(p => ({ x: p.d, y: p.v }));
+  // The range selector re-anchors rather than cropping: a shorter window means
+  // "how did the two compare over that window", so both lines still start at
+  // zero. "All" is the full series, which begins at the anchor.
+  let anchor = base0;
+  if (state.range === 'ytd') anchor = maxDate(anchor, `${new Date().getUTCFullYear()}-01-01`);
+  else if (state.range === 'custom') anchor = maxDate(anchor, state.from);
+  else if (state.range !== 'all')
+    anchor = maxDate(anchor, new Date(Date.now() - Number(state.range) * 86400000)
+      .toISOString().slice(0, 10));
+  const dfdvPts = allDfdv.filter(p => p.x >= anchor);
   // SOL trades continuously and its series carries a live quote; DFDV stops at
   // the last close. Ending both on the same date keeps the comparison honest —
   // otherwise a day's move in SOL is scored against a stale DFDV print.
-  const through = dfdvPts[dfdvPts.length - 1]?.x || '9999';
+  const through = allDfdv[allDfdv.length - 1]?.x || '9999';
   const solPts = state.priceSeries.filter(p => p.x >= anchor && p.x <= through);
   // Base off the anchor date itself, not the first weekly close, or the two
   // lines start from different days and neither begins at zero.
   const at = (pts, d) => { let v = null; for (const p of pts) if (p.x <= d) v = p.y; return v; };
-  const baseD = at(dfdvPts, anchor) ?? dfdvPts[0]?.y;
+  const baseD = at(allDfdv, anchor) ?? dfdvPts[0]?.y;
   const baseS = at(state.priceSeries, anchor);
   if (!baseD || !baseS || !dfdvPts.length) {         // no DFDV feed — fall back
     state.levered = false;
     $('leveredBtn').setAttribute('aria-pressed', 'false');
     return drawPrice();
   }
-  const weeklyLast = pts => {
+  const bucketLast = pts => {
     const m = new Map();
-    for (const p of pts) m.set(bucketKey(p.x, 'w'), p);
+    for (const p of pts) m.set(bucketKey(p.x, state.agg), p);
     return [...m.values()];
   };
   const rebased = (pts, base) => [{ x: anchor, y: 0 }].concat(
-    weeklyLast(pts.map(p => ({ x: p.x, y: (p.y / base - 1) * 100 }))).filter(p => p.x > anchor));
+    bucketLast(pts.map(p => ({ x: p.x, y: (p.y / base - 1) * 100 }))).filter(p => p.x > anchor));
 
   const dfdvSeries = rebased(dfdvPts, baseD), solSeries = rebased(solPts, baseS);
   priceChart.$candles = null; priceChart.$candleMap = {};
@@ -1793,29 +1801,36 @@ function drawLevered() {
       pointRadius: 0, pointHoverRadius: 3, tension: 0.2, fill: false, order: 9 },
   ];
   const y = priceChart.options.scales.y;
-  y.type = 'linear';                                 // a log axis cannot show a loss
+  // A percentage series crosses zero and goes negative, which a log axis cannot
+  // plot — so this view is linear, and the selector is set to match rather than
+  // left showing a scale that isn't in use.
+  y.type = 'linear';
+  if (state.scale !== 'linear') setScale('linear');
   delete y.min; delete y.max;
   y.ticks.callback = v => pctSigned(v);
-  priceChart.options.scales.x.time.unit = 'week';
+  priceChart.options.scales.x.time.unit =
+    state.agg === 'y' ? 'year' : state.agg === 'm' ? 'month' : 'week';
   priceChart.update();
 
   const lastD = dfdvSeries[dfdvSeries.length - 1].y, lastS = solSeries[solSeries.length - 1].y;
   const beta = lastS ? lastD / lastS : null;
+  const atBottom = anchor === base0;
   $('rbLegend').style.display = 'flex';
   $('rbLegend').innerHTML =
     `<span class="leg"><span class="sw" style="background:${DFDV_COLOR}"></span>DFDV <span class="v num">(${pctSigned(lastD)})</span></span>` +
     `<span class="leg"><span class="sw" style="background:${SOL_COLOR}"></span>SOL <span class="v num">(${pctSigned(lastS)})</span></span>` +
-    (beta ? `<span class="leg"><span class="v num">${beta.toFixed(2)}× SOL since ${fmtDate(anchor)}` +
+    (beta ? `<span class="leg"><span class="v num">${beta.toFixed(2)}× SOL` +
+            ` · ${AGG_LABEL[state.agg]} from ${fmtDate(anchor)}` +
+            `${atBottom ? ", SOL's 2026 bottom" : ''}` +
             ` · both through ${fmtDate(through)}</span></span>` : '');
 }
 
-/* Levered mode fixes its own window, interval and scale, so the controls that
-   would contradict it are switched off rather than silently ignored. */
+const maxDate = (a, b) => (b && b > a ? b : a);
+
+/* Only the custom start date hides itself; every control stays live in levered
+   mode, where the range re-anchors and the interval resamples. */
 function syncPriceControls() {
-  for (const id of ['priceRange', 'priceAgg', 'priceScale', 'rainbowBtn'])
-    $(id).disabled = state.levered;
-  $('priceFrom').style.display =
-    !state.levered && state.range === 'custom' ? '' : 'none';
+  $('priceFrom').style.display = state.range === 'custom' ? '' : 'none';
 }
 
 /* ------------------------------------------------------------ live network */
