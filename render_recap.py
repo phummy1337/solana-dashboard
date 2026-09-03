@@ -16,11 +16,18 @@ from __future__ import annotations
 
 import calendar
 import json
+import ssl
 import sys
 import urllib.request
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+
+try:
+    import certifi
+    _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CTX = ssl.create_default_context()
 
 HERE = Path(__file__).parent
 FONTS = {
@@ -92,7 +99,11 @@ def _font(name: str, size: int, axes: list[int]) -> ImageFont.FreeTypeFont:
         return _cache[key]
     path, url = FONTS[name]
     if not path.exists():
-        urllib.request.urlretrieve(url, path)
+        # The stock context has no root bundle on a fresh macOS Python, so this
+        # only ever worked off a warm /tmp. Verify against certifi like
+        # refresh_data.py does.
+        with urllib.request.urlopen(url, context=_SSL_CTX, timeout=180) as r:
+            path.write_bytes(r.read())      # a few MB of variable font
     f = ImageFont.truetype(str(path), size)
     try:
         f.set_variation_by_axes(axes)
@@ -114,8 +125,10 @@ def compact(n: float | None, prefix: str = "") -> str:
     if n is None:
         return "—"
     a = abs(n)
+    # 0.9995 claims a value that would round up into the unit: 999,585 belongs
+    # in "1.00M", not the "1000K" a plain `a >= v` produces.
     for v, s in ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")):
-        if a >= v:
+        if a >= v * 0.9995:
             q = n / v
             return f"{prefix}{q:.0f}{s}" if abs(q) >= 100 else (
                 f"{prefix}{q:.1f}{s}" if abs(q) >= 10 else f"{prefix}{q:.2f}{s}")

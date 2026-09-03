@@ -88,6 +88,22 @@ def get(url: str, headers: dict | None = None, tries: int = 3) -> dict | list:
     raise RuntimeError(f"GET {url.split('?')[0]} failed: {last}")
 
 
+def post_json(url: str, body: dict, tries: int = 3) -> dict | list:
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, headers={
+        "User-Agent": UA, "Accept": "application/json", "Content-Type": "application/json"})
+    last = None
+    for attempt in range(tries):
+        try:
+            with urllib.request.urlopen(req, timeout=90, context=_SSL_CTX) as r:
+                return json.loads(r.read().decode())
+        except Exception as e:  # noqa: BLE001 - retry any transport/parse failure
+            last = e
+            if attempt < tries - 1:
+                time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"POST {url.split('?')[0]} failed: {last}")
+
+
 def bw(path: str, **params) -> dict | list:
     if not BW_KEY:
         raise RuntimeError("BLOCKWORKS_API_KEY is not set")
@@ -856,6 +872,45 @@ def main() -> int:
             print("  derived tx_per_address: " + ", ".join(f"{c}:{len(v)}" for c, v in tpa.items()))
     except Exception as e:  # noqa: BLE001
         warn(f"derived demand ratios: {e}")
+
+    # ------------------------------------------------------- x402 by chain
+    # x402scan's own dashboard runs on this tRPC endpoint. It is undocumented
+    # and unversioned, so treat a failure as routine and keep the last good
+    # copy: the section hides itself rather than breaking the page.
+    #
+    # Only three bucket tables exist upstream (1/7/30 days), so 30 days at 15h
+    # granularity is the whole history available — there is no monthly series to
+    # be had. Amounts are USDC atomic units; /1e6 reconciles with the totals
+    # x402scan prints on its own front page.
+    try:
+        x402: dict = {"chains": {}, "window_days": 30}
+        for chain in ("solana", "base", "polygon", "optimism"):
+            r = post_json(
+                "https://www.x402scan.com/api/trpc/public.stats.bucketed?batch=1",
+                {"0": {"json": {"timeframe": 30, "chain": chain}}})
+            rows = (r[0].get("result", {}).get("data", {}) or {}).get("json")
+            if not isinstance(rows, list):
+                raise RuntimeError(f"unexpected shape for {chain}")
+            pts = [{"t": b["bucket_start"], "tx": b["total_transactions"],
+                    "usd": b["total_amount"] / 1e6, "buyers": b.get("unique_buyers")}
+                   for b in rows]
+            if any(p["tx"] for p in pts):             # skip chains with no activity
+                x402["chains"][chain] = pts
+            time.sleep(1)
+        if x402["chains"]:
+            data["x402"] = x402
+            tot = {c: sum(p["usd"] for p in v) for c, v in x402["chains"].items()}
+            gross = sum(tot.values()) or 1
+            print("  x402 30d: " + ", ".join(
+                f"{c} ${v:,.0f} ({v / gross * 100:.0f}%)" for c, v in sorted(
+                    tot.items(), key=lambda kv: -kv[1])))
+    except Exception as e:  # noqa: BLE001
+        warn(f"x402 by chain: {e}")
+        try:                                          # stale beats absent here
+            if prev_x := json.loads(OUT.read_text()).get("x402"):
+                data["x402"] = prev_x
+        except Exception:  # noqa: BLE001 - first run or unreadable
+            pass
 
     # ------------------------------------------- SOL monthly return seasonality
     # Calendar-month returns since inception: last close of month N versus last
