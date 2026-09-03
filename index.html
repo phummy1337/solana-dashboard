@@ -129,6 +129,8 @@
   button.tgl:hover { color: var(--ink); border-color: rgba(143,165,212,0.4); }
   button.tgl[aria-pressed="true"] { color: #12100B; background: var(--orange); border-color: var(--orange); }
   button.tgl:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+  button.tgl:disabled, select.rsel:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.tgl:disabled:hover { color: var(--peri); border-color: var(--line); }
 
   .stage { padding: 14px 48px 0; }
   .stage .wrap { position: relative; height: 44vh; min-height: 320px; max-height: 460px; }
@@ -475,13 +477,24 @@
     <div class="controls">
       <span class="ctl-label">Range</span>
       <select class="rsel" id="priceRange" aria-label="Time period">
+        <option value="30">1M</option>
         <option value="90">3M</option>
         <option value="ytd">YTD</option>
         <option value="365">1Y</option>
         <option value="1826">5Y</option>
         <option value="all" selected>All</option>
+        <option value="custom">Custom</option>
+      </select>
+      <input type="date" class="rsel dsel" id="priceFrom" aria-label="Start date" style="display:none">
+      <span class="ctl-label">Interval</span>
+      <select class="rsel" id="priceAgg" aria-label="Candle interval">
+        <option value="d">Daily</option>
+        <option value="w" selected>Weekly</option>
+        <option value="m">Monthly</option>
+        <option value="y">Yearly</option>
       </select>
       <button class="tgl" id="rainbowBtn" aria-pressed="true" style="margin-left:10px">🌈 SOL Rainbow</button>
+      <button class="tgl" id="leveredBtn" aria-pressed="false">⚡ Levered SOL</button>
       <span class="spacer"></span>
       <span class="ctl-label">Scale</span>
       <select class="rsel" id="priceScale" aria-label="Axis scale">
@@ -743,6 +756,7 @@ async function rpc(method, params = [], attempt = 0) {
 const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply: null, inflation: null,
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
                 rainbow: true, preRainbowScale: 'linear',
+                agg: 'w', from: null, levered: false, dfdv: null,
                 trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
                 trendHidden: {}, trendAggs: {}, trendFrom: {}, trendSeries: {}, trendCompare: {} };
 
@@ -798,14 +812,22 @@ const tooltipCfg = {
    intraday history, so wicks span the week's daily closes). Up/down colors
    match solanarainbow.com. */
 const CANDLE_UP = '#90A2DC', CANDLE_DOWN = '#FF7117';
-function weeklyCandles(pts) {
+/* Bucket key for a daily point at the chosen interval. The trailing bucket is
+   deliberately left partial — the current week or month should show what it has
+   done so far, not vanish until it closes. */
+function bucketKey(iso, period) {
+  if (period === 'd') return iso;
+  if (period === 'm') return iso.slice(0, 7);
+  if (period === 'y') return iso.slice(0, 4);
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));   // back to Monday
+  return d.toISOString().slice(0, 10);
+}
+function weeklyCandles(pts, period = 'w') {
   const out = [];
   let cur = null;
   for (const p of pts) {
-    const d = new Date(p.x + 'T00:00:00Z');
-    const monday = new Date(d);
-    monday.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-    const key = monday.toISOString().slice(0, 10);
+    const key = bucketKey(p.x, period);
     if (!cur || cur.key !== key) {
       cur = { key, x: p.x, o: p.y, h: p.y, l: p.y, c: p.y };
       out.push(cur);
@@ -864,16 +886,17 @@ const priceChart = new Chart($('priceChart'), {
                tooltip: { ...tooltipCfg,
                  // Nine band datasets would drown the tooltip; show the price
                  // line only, plus the rainbow zone as a footer when it's on.
-                 filter: item => item.dataset.label === 'SOL',
+                 filter: item => state.levered || item.dataset.label === 'SOL',
                  callbacks: {
                    label: c => {
+                     if (state.levered) return `${c.dataset.label}  ${pctSigned(c.parsed.y)}`;
                      const cd = priceChart.$candleMap?.[c.raw.x];
                      if (!cd) return 'SOL  ' + price(c.parsed.y);
                      return [`O ${price(cd.o)}   H ${price(cd.h)}`,
                              `L ${price(cd.l)}   C ${price(cd.c)}`];
                    },
                    afterBody: items => {
-                     if (!state.rainbow || !items.length) return '';
+                     if (state.levered || !state.rainbow || !items.length) return '';
                      const p = items[0].raw;
                      return 'Zone: ' + zoneFor(p.x, p.y);
                    },
@@ -1267,6 +1290,16 @@ async function downloadTrendImage(key, title, fmt, el, range) {
 async function downloadPriceImage() {
   const last = state.priceSeries[state.priceSeries.length - 1];
   if (!last) return;
+  if (state.levered) {
+    const items = priceChart.data.datasets.map(ds => ({
+      label: ds.label, color: ds.borderColor, val: ds.data[ds.data.length - 1]?.y }));
+    await dfdvLogo();
+    const cv = await buildShareImage(snapshotChart(priceChart), 'Levered SOL — DFDV vs SOL',
+      `weekly, rebased to ${fmtDate(state.dfdv.anchor)} · latest point is week to date`,
+      items, pctSigned);
+    if (cv) saveCanvas(cv, 'state-of-solana-levered-sol.png');
+    return;
+  }
   const sel = $('priceRange');
   const rangeLabel = sel.options[sel.selectedIndex]?.text || '';
   let note = `${rangeLabel} · ${state.scale === 'logarithmic' ? 'log' : 'linear'} scale`;
@@ -1580,6 +1613,8 @@ async function loadData() {
 
     // charts
     state.priceSeries = (d.series?.price || []).map(p => ({ x: p.d, y: p.v }));
+    state.dfdv = d.dfdv || null;
+    $('leveredBtn').style.display = state.dfdv ? '' : 'none';
     drawPrice();
     state.trendSeries = d.series || {};
     state.trendCompare = d.compare || {};
@@ -1654,15 +1689,18 @@ function renderTiles() {
 }
 
 function drawPrice() {
+  if (state.levered) return drawLevered();
   let pts = state.priceSeries;
   if (state.range === 'ytd') {
     const jan1 = `${new Date().getUTCFullYear()}-01-01`;
     pts = pts.filter(p => p.x >= jan1);
+  } else if (state.range === 'custom') {
+    if (state.from) pts = pts.filter(p => p.x >= state.from);
   } else if (state.range !== 'all') {
     const cutoff = new Date(Date.now() - Number(state.range) * 86400000).toISOString().slice(0, 10);
     pts = pts.filter(p => p.x >= cutoff);
   }
-  const cands = weeklyCandles(pts);
+  const cands = weeklyCandles(pts, state.agg);
   priceChart.$candles = cands;
   priceChart.$candleMap = Object.fromEntries(cands.map(c => [c.x, c]));
   priceDs.data = cands.map(c => ({ x: c.x, y: c.c }));
@@ -1683,7 +1721,20 @@ function drawPrice() {
     });
   }
   priceChart.data.datasets = sets;
-  priceChart.options.scales.y.type = state.scale;
+  const y = priceChart.options.scales.y;
+  y.type = state.scale;
+  y.ticks.callback = v => '$' + (v >= 1000 ? compact(v) : v);
+  // Bound the axis to the prices on screen. The bands run from a few dollars to
+  // four figures, so letting them size the axis squashed a 3M window of $60-110
+  // candles into the bottom eighth of the plot. Padding is wider with the
+  // rainbow up so the neighbouring bands still frame the price.
+  if (cands.length) {
+    const lo = Math.min(...cands.map(c => c.l)), hi = Math.max(...cands.map(c => c.h));
+    const [down, up] = state.rainbow ? [1.8, 2.0] : [1.12, 1.12];
+    if (state.scale === 'logarithmic') { y.min = lo / down; y.max = hi * up; }
+    else { const pad = (hi - lo) * (state.rainbow ? 0.9 : 0.12);
+           y.min = Math.max(0, lo - pad); y.max = hi + pad; }
+  } else { delete y.min; delete y.max; }
   priceChart.options.scales.x.time.unit = pts.length > 400 ? 'year' : pts.length > 120 ? 'month' : 'week';
   priceChart.update();
 
@@ -1696,7 +1747,75 @@ function drawPrice() {
     `${RB.NAMES[String(k)]} <span class="v num">($${bandAt(today, k).toFixed(1)})</span></span>`
   ).join('') : '';
   leg.innerHTML =
-    `<span class="leg"><span class="sw candle"></span>SOL weekly</span>` + bandChips;
+    `<span class="leg"><span class="sw candle"></span>SOL ${AGG_LABEL[state.agg]}</span>` + bandChips;
+}
+
+const AGG_LABEL = { d: 'daily', w: 'weekly', m: 'monthly', y: 'yearly' };
+// one decimal, unlike the shared signed(): axis ticks read badly at two
+const pctSigned = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+const DFDV_COLOR = '#F97316', SOL_COLOR = '#14F195';
+
+/* DFDV against SOL since the anchor, both rebased to zero, sampled weekly.
+   The last bucket is deliberately partial — it is the week so far. */
+function drawLevered() {
+  const src = state.dfdv;
+  const anchor = src?.anchor;
+  const dfdvPts = (src?.points || []).map(p => ({ x: p.d, y: p.v }));
+  // SOL trades continuously and its series carries a live quote; DFDV stops at
+  // the last close. Ending both on the same date keeps the comparison honest —
+  // otherwise a day's move in SOL is scored against a stale DFDV print.
+  const through = dfdvPts[dfdvPts.length - 1]?.x || '9999';
+  const solPts = state.priceSeries.filter(p => p.x >= anchor && p.x <= through);
+  // Base off the anchor date itself, not the first weekly close, or the two
+  // lines start from different days and neither begins at zero.
+  const at = (pts, d) => { let v = null; for (const p of pts) if (p.x <= d) v = p.y; return v; };
+  const baseD = at(dfdvPts, anchor) ?? dfdvPts[0]?.y;
+  const baseS = at(state.priceSeries, anchor);
+  if (!baseD || !baseS || !dfdvPts.length) {         // no DFDV feed — fall back
+    state.levered = false;
+    $('leveredBtn').setAttribute('aria-pressed', 'false');
+    return drawPrice();
+  }
+  const weeklyLast = pts => {
+    const m = new Map();
+    for (const p of pts) m.set(bucketKey(p.x, 'w'), p);
+    return [...m.values()];
+  };
+  const rebased = (pts, base) => [{ x: anchor, y: 0 }].concat(
+    weeklyLast(pts.map(p => ({ x: p.x, y: (p.y / base - 1) * 100 }))).filter(p => p.x > anchor));
+
+  const dfdvSeries = rebased(dfdvPts, baseD), solSeries = rebased(solPts, baseS);
+  priceChart.$candles = null; priceChart.$candleMap = {};
+  priceChart.data.datasets = [
+    { label: 'DFDV', data: dfdvSeries, borderColor: DFDV_COLOR, borderWidth: 2.4,
+      pointRadius: 0, pointHoverRadius: 3, tension: 0.2, fill: false, order: 10 },
+    { label: 'SOL', data: solSeries, borderColor: SOL_COLOR, borderWidth: 2,
+      pointRadius: 0, pointHoverRadius: 3, tension: 0.2, fill: false, order: 9 },
+  ];
+  const y = priceChart.options.scales.y;
+  y.type = 'linear';                                 // a log axis cannot show a loss
+  delete y.min; delete y.max;
+  y.ticks.callback = v => pctSigned(v);
+  priceChart.options.scales.x.time.unit = 'week';
+  priceChart.update();
+
+  const lastD = dfdvSeries[dfdvSeries.length - 1].y, lastS = solSeries[solSeries.length - 1].y;
+  const beta = lastS ? lastD / lastS : null;
+  $('rbLegend').style.display = 'flex';
+  $('rbLegend').innerHTML =
+    `<span class="leg"><span class="sw" style="background:${DFDV_COLOR}"></span>DFDV <span class="v num">(${pctSigned(lastD)})</span></span>` +
+    `<span class="leg"><span class="sw" style="background:${SOL_COLOR}"></span>SOL <span class="v num">(${pctSigned(lastS)})</span></span>` +
+    (beta ? `<span class="leg"><span class="v num">${beta.toFixed(2)}× SOL since ${fmtDate(anchor)}` +
+            ` · both through ${fmtDate(through)}</span></span>` : '');
+}
+
+/* Levered mode fixes its own window, interval and scale, so the controls that
+   would contradict it are switched off rather than silently ignored. */
+function syncPriceControls() {
+  for (const id of ['priceRange', 'priceAgg', 'priceScale', 'rainbowBtn'])
+    $(id).disabled = state.levered;
+  $('priceFrom').style.display =
+    !state.levered && state.range === 'custom' ? '' : 'none';
 }
 
 /* ------------------------------------------------------------ live network */
@@ -1872,6 +1991,23 @@ async function loadSupply() {
 /* -------------------------------------------------------------- controls */
 $('priceRange').addEventListener('change', e => {
   state.range = e.target.value;
+  if (state.range === 'custom' && !state.from) {
+    // seed the picker with the earliest date there is data for
+    const first = state.priceSeries[0]?.x;
+    state.from = $('priceFrom').value || first || null;
+    if (state.from) $('priceFrom').value = state.from;
+    $('priceFrom').min = first || '';
+    $('priceFrom').max = state.priceSeries[state.priceSeries.length - 1]?.x || '';
+  }
+  syncPriceControls();
+  drawPrice();
+});
+$('priceFrom').addEventListener('change', e => {
+  state.from = e.target.value || null;
+  drawPrice();
+});
+$('priceAgg').addEventListener('change', e => {
+  state.agg = e.target.value;
   drawPrice();
 });
 $('priceScale').addEventListener('change', e => {
@@ -1918,10 +2054,21 @@ for (const evt of ['mouseover', 'focusin']) document.addEventListener(evt, e => 
 $('rainbowBtn').addEventListener('click', () => {
   state.rainbow = !state.rainbow;
   $('rainbowBtn').setAttribute('aria-pressed', String(state.rainbow));
-  // The bands are exponential curves — mirror the source site by defaulting to
-  // log while the rainbow is up, and restore the prior scale on the way out.
-  if (state.rainbow) { state.preRainbowScale = state.scale; setScale('logarithmic'); }
-  else setScale(state.preRainbowScale);
+  // The bands are exponential curves, so switching the rainbow on forces log.
+  // Switching it off leaves the scale alone: log suits a multi-year price
+  // series either way, and silently flipping the axis under the user was
+  // disorienting.
+  if (state.rainbow) setScale('logarithmic');
+  drawPrice();
+});
+$('leveredBtn').addEventListener('click', () => {
+  state.levered = !state.levered;
+  $('leveredBtn').setAttribute('aria-pressed', String(state.levered));
+  if (state.levered && state.rainbow) {      // one overlay at a time: $ vs %
+    state.rainbow = false;
+    $('rainbowBtn').setAttribute('aria-pressed', 'false');
+  }
+  syncPriceControls();
   drawPrice();
 });
 

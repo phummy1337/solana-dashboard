@@ -873,6 +873,36 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         warn(f"derived demand ratios: {e}")
 
+    # --------------------------------------------------------- DFDV share price
+    # For the "Levered SOL" overlay: DFDV's own API carries SOL and holdings but
+    # not its share price, so closes come from Nasdaq (keyless, but it wants a
+    # browser agent). Only what the overlay plots is kept — daily closes from
+    # the anchor onwards, nothing earlier.
+    try:
+        anchor = "2026-06-26"                        # treasury-strategy anchor
+        start = (date.fromisoformat(anchor) - timedelta(days=10)).isoformat()
+        u = ("https://api.nasdaq.com/api/quote/DFDV/historical?assetclass=stocks"
+             f"&fromdate={start}&todate={date.today().isoformat()}&limit=400")
+        j = get(u, {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+        rows = ((j.get("data") or {}).get("tradesTable") or {}).get("rows") or []
+        closes = {}
+        for r in rows:
+            m, dd, y = r["date"].split("/")
+            closes[f"{y}-{m}-{dd}"] = float(r["close"].replace("$", "").replace(",", ""))
+        pts = [{"d": k, "v": round(v, 4)} for k, v in sorted(closes.items()) if k >= anchor]
+        if len(pts) < 5:
+            raise RuntimeError(f"only {len(pts)} closes since {anchor}")
+        data["dfdv"] = {"anchor": anchor, "points": pts}
+        print(f"  DFDV closes: {len(pts)} days, {pts[0]['d']} ${pts[0]['v']} "
+              f"-> {pts[-1]['d']} ${pts[-1]['v']}")
+    except Exception as e:  # noqa: BLE001
+        warn(f"DFDV share price: {e}")
+        try:
+            if prev_d := json.loads(OUT.read_text()).get("dfdv"):
+                data["dfdv"] = prev_d
+        except Exception:  # noqa: BLE001 - first run or unreadable
+            pass
+
     # ------------------------------------------------------- x402 by chain
     # x402scan's own dashboard runs on this tRPC endpoint. It is undocumented
     # and unversioned, so treat a failure as routine and keep the last good
