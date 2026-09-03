@@ -902,7 +902,22 @@ def main() -> int:
                for k, v in (pre[-1:] if pre else []) + [kv for kv in ordered if kv[0] > anchor]]
         if len(pts) < 5:
             raise RuntimeError(f"only {len(pts)} closes since {anchor}")
-        data["dfdv"] = {"anchor": anchor, "points": pts}
+        # Today has no close until the bell, so the chart would sit a day behind
+        # SOL. Carry the last trade as a provisional point instead, flagged so
+        # the caption can say it is intraday.
+        live = False
+        try:
+            q = get("https://api.nasdaq.com/api/quote/DFDV/info?assetclass=stocks",
+                    {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+            pd_ = ((q.get("data") or {}).get("primaryData") or {})
+            px = float(str(pd_.get("lastSalePrice", "")).replace("$", "").replace(",", ""))
+            today = date.today().isoformat()
+            if px > 0 and today > pts[-1]["d"]:
+                pts.append({"d": today, "v": round(px, 4)})
+                live = True
+        except Exception as e:  # noqa: BLE001 - the closes alone are still usable
+            warn(f"DFDV live quote: {e}")
+        data["dfdv"] = {"anchor": anchor, "points": pts, "intraday": live}
         print(f"  DFDV closes: {len(pts)} days, {pts[0]['d']} ${pts[0]['v']} "
               f"-> {pts[-1]['d']} ${pts[-1]['v']}")
     except Exception as e:  # noqa: BLE001

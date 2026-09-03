@@ -1769,10 +1769,13 @@ function drawLevered() {
     anchor = maxDate(anchor, new Date(Date.now() - Number(state.range) * 86400000)
       .toISOString().slice(0, 10));
   const dfdvPts = allDfdv.filter(p => p.x >= anchor);
-  // SOL trades continuously and its series carries a live quote; DFDV stops at
-  // the last close. Ending both on the same date keeps the comparison honest —
-  // otherwise a day's move in SOL is scored against a stale DFDV print.
-  const through = allDfdv[allDfdv.length - 1]?.x || '9999';
+  // End on the last date both sides actually have a value for. SOL runs on a
+  // live quote and DFDV on the last trade, so whichever is behind sets the
+  // date — otherwise one side's move gets scored against the other's stale
+  // print, and today drops out entirely whenever only one of them has it.
+  const lastSol = state.priceSeries[state.priceSeries.length - 1]?.x || '0000';
+  const lastDfdv = allDfdv[allDfdv.length - 1]?.x || '0000';
+  const through = lastSol < lastDfdv ? lastSol : lastDfdv;
   const solPts = state.priceSeries.filter(p => p.x >= anchor && p.x <= through);
   // Base off the anchor date itself, not the first weekly close, or the two
   // lines start from different days and neither begins at zero.
@@ -1784,6 +1787,17 @@ function drawLevered() {
     $('leveredBtn').setAttribute('aria-pressed', 'false');
     return drawPrice();
   }
+  // Both lines have to sit on one date axis or Chart.js's index tooltip can
+  // only resolve one of them — DFDV has no weekend prints, so its points fell
+  // between SOL's and the hover showed SOL alone. SOL supplies the axis (it has
+  // every calendar day) and DFDV is carried forward across days it did not
+  // trade, which is how a stock is drawn against a 24/7 asset anyway.
+  const axis = solPts.map(p => p.x);
+  const ffill = pts => {
+    const m = new Map(pts.map(p => [p.x, p.y]));
+    let last = at(allDfdv, axis[0]);
+    return axis.map(x => { if (m.has(x)) last = m.get(x); return { x, y: last }; });
+  };
   const bucketLast = pts => {
     const m = new Map();
     for (const p of pts) m.set(bucketKey(p.x, state.agg), p);
@@ -1792,7 +1806,7 @@ function drawLevered() {
   const rebased = (pts, base) => [{ x: anchor, y: 0 }].concat(
     bucketLast(pts.map(p => ({ x: p.x, y: (p.y / base - 1) * 100 }))).filter(p => p.x > anchor));
 
-  const dfdvSeries = rebased(dfdvPts, baseD), solSeries = rebased(solPts, baseS);
+  const dfdvSeries = rebased(ffill(dfdvPts), baseD), solSeries = rebased(solPts, baseS);
   priceChart.$candles = null; priceChart.$candleMap = {};
   priceChart.data.datasets = [
     { label: 'DFDV', data: dfdvSeries, borderColor: DFDV_COLOR, borderWidth: 2.4,
@@ -1822,7 +1836,9 @@ function drawLevered() {
     (beta ? `<span class="leg"><span class="v num">${beta.toFixed(2)}× SOL` +
             ` · ${AGG_LABEL[state.agg]} from ${fmtDate(anchor)}` +
             `${atBottom ? ", SOL's 2026 bottom" : ''}` +
-            ` · both through ${fmtDate(through)}</span></span>` : '');
+            ` · both through ${fmtDate(through)}` +
+            `${src.intraday && through === lastDfdv ? ' (intraday)' : ''}` +
+            `</span></span>` : '');
 }
 
 const maxDate = (a, b) => (b && b > a ? b : a);
