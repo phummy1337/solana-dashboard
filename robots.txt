@@ -1,4 +1,10 @@
 User-agent: *
 Allow: /
 
+# data.json holds the values this page draws, under licence from the data
+# providers. It is here for the dashboard to render, not to be crawled,
+# indexed or collected as a dataset.
+Disallow: /data.json
+Disallow: /highlights.json
+
 Sitemap: https://stateofsol.com/sitemap.xml

@@ -971,6 +971,53 @@ def main() -> int:
     data["compare"] = compare
     data["daily"] = daily
     data["warnings"] = warnings
+
+    # ------------------------------------------------- ship display values only
+    # This file is fetched by the browser, so whatever it holds is public. Keep
+    # it to what the page actually draws, at the precision it draws at: the
+    # licensed feeds are for stateofsol.com to render, not for us to republish
+    # as a dataset. `succeeded` only ever fed the server-side ratios above and
+    # is never read by the page, so it does not ship at all.
+    compare.pop("succeeded", None)
+
+    # The cross-chain cards offer nothing longer than 5y, so history past that
+    # is shipped to every visitor and drawn for none of them. Six years leaves
+    # room for a custom start date and stops the file growing without bound.
+    horizon = (date.today() - timedelta(days=366 * 6)).isoformat()
+    for chains in compare.values():
+        for chain, pts in chains.items():
+            chains[chain] = [p for p in pts if p["d"] >= horizon]
+
+    # decimals per series, matched to how each one is labelled on the page
+    PLACES = {
+        "rev": 0, "dex_volume": 0, "defi_tvl": 0, "stablecoin_supply": 0,
+        "tokenized_equity_volume": 0, "transactions": 0, "active_addresses": 0,
+        "rev_share": 2, "tx_per_address": 2, "fsr": 2, "fee_vol": 2,
+        "fee_median": 7, "price_perf": 4,
+    }
+
+    def round_pts(pts: list, places: int) -> list:
+        for p in pts:
+            v = p.get("v")
+            if isinstance(v, float):
+                p["v"] = round(v, places) if places else round(v)
+        return pts
+
+    for key, chains in compare.items():
+        places = PLACES.get(key, 4)
+        for pts in chains.values():
+            round_pts(pts, places)
+    for key, pts in data.get("series", {}).items():
+        if isinstance(pts, list):
+            round_pts(pts, 0 if key.endswith(("transactions", "volume", "supply", "tvl"))
+                      else 4)
+
+    data["_notice"] = (
+        "Display data for stateofsol.com, derived from Blockworks, DefiLlama and "
+        "CoinGecko and rounded to the precision the page renders. Not a "
+        "redistribution of any provider's dataset; please license source data "
+        "from the providers directly.")
+
     OUT.write_text(json.dumps(data, separators=(",", ":")))
     print(f"\nWrote {OUT} ({OUT.stat().st_size:,} bytes) — {len(warnings)} warning(s)")
     return 0
