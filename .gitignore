@@ -4,3 +4,7 @@ __pycache__/
 .env
 refresh.log
 solana-recap-*.png
+
+# Built at deploy time and published as a Pages artifact, never committed —
+# it holds licensed feeds and every commit would archive another snapshot.
+data.json

@@ -1,0 +1,104 @@
+name: Build and deploy
+
+# data.json is no longer committed. It is built (or carried over from the live
+# site) at deploy time and published as a Pages artifact, so the repo stops
+# accumulating a public snapshot of the licensed feeds on every refresh.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Measured from refresh-commit history: Blockworks lands the previous UTC
+    # day anywhere between ~08:00 and ~19:00 UTC. Run every 2h through that
+    # window (max ~2h lag), plus an early pass for prices/yields/reserves.
+    - cron: "15 4,8,10,12,14,16,18,20 * * *"
+  workflow_dispatch:
+    inputs:
+      refresh:
+        description: "Rebuild data.json from the upstream APIs"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install certifi
+        run: pip install --quiet certifi
+
+      - name: Obtain data.json
+        env:
+          BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
+          EVENT: ${{ github.event_name }}
+          WANT_REFRESH: ${{ github.event.inputs.refresh }}
+        run: |
+          # A push is normally a content change, not a data change. Reuse what
+          # is already live rather than spending fifteen minutes and a CoinGecko
+          # rate limit rebuilding an identical file. Anything that cannot be
+          # reused falls through to a full refresh, so a deploy never ships
+          # without data.
+          reuse=false
+          if [ "$EVENT" = "push" ] || { [ "$EVENT" = "workflow_dispatch" ] && [ "$WANT_REFRESH" = "false" ]; }; then
+            if curl -fsS --max-time 120 -o data.json https://stateofsol.com/data.json \
+               && python3 -c "import json,sys; sys.exit(0 if json.load(open('data.json')).get('stats',{}).get('price') else 1)"; then
+              reuse=true
+              echo "Reused the live data.json ($(wc -c < data.json) bytes)"
+            else
+              echo "Live data.json unusable — refreshing instead"
+              rm -f data.json
+            fi
+          fi
+          if [ "$reuse" = false ]; then
+            python3 refresh_data.py
+          fi
+
+      - name: Check the data before publishing it
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("data.json"))
+          for line in d.get("warnings") or []:
+              print(f"::warning::{line}")
+          # A run that resolved nothing means the key or an API broke; don't
+          # deploy a gutted data.json over a good one.
+          if not d.get("stats", {}).get("price"):
+              sys.exit("no price data — refusing to deploy")
+          PY
+
+      - name: Assemble the site
+        run: |
+          # Only what the site serves. The scripts, workflow and README used to
+          # be published too, purely because Pages served the repo root.
+          mkdir -p _site
+          cp index.html data.json highlights.json CNAME robots.txt sitemap.xml \
+             og-card-v4.png dfdv-logo.png _site/
+          ls -la _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
