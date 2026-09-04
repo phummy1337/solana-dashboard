@@ -952,8 +952,39 @@ def main() -> int:
             if any(p["tx"] for p in pts):             # skip chains with no activity
                 x402["chains"][chain] = pts
             time.sleep(1)
+        # Fold the 15-hour buckets into calendar days so the cross-chain cards,
+        # which all speak daily {d, v}, can carry this. A bucket straddling
+        # midnight is split across the days it covers in proportion to the hours
+        # in each: a day is therefore an allocation, while window totals stay
+        # exact. Assigning a whole bucket to its start date instead would give
+        # some days two buckets and some one.
+        def x402_daily(points: list, field: str) -> list:
+            out: dict = {}
+            covered: dict = {}
+            for i, p in enumerate(points):
+                start = datetime.fromisoformat(p["t"].replace("Z", "+00:00"))
+                end = (datetime.fromisoformat(points[i + 1]["t"].replace("Z", "+00:00"))
+                       if i + 1 < len(points) else start + timedelta(hours=15))
+                span = (end - start).total_seconds() or 1
+                cur = start
+                while cur < end:
+                    nxt = min(end, (cur + timedelta(days=1)).replace(
+                        hour=0, minute=0, second=0, microsecond=0))
+                    day = cur.date().isoformat()
+                    secs = (nxt - cur).total_seconds()
+                    out[day] = out.get(day, 0) + p[field] * (secs / span)
+                    covered[day] = covered.get(day, 0) + secs
+                    cur = nxt
+            # Keep only days the rolling window covers end to end. Its first and
+            # last days are clipped, so they would always read low and drag the
+            # newest point of every chart down with them.
+            return [{"d": k, "v": v} for k, v in sorted(out.items()) if covered[k] >= 86_000]
+
         if x402["chains"]:
             data["x402"] = x402
+            for field, key in (("tx", "x402_txns"), ("usd", "x402_volume")):
+                compare[key] = {ch: x402_daily(pts, field)
+                                for ch, pts in x402["chains"].items()}
             tot = {c: sum(p["usd"] for p in v) for c, v in x402["chains"].items()}
             gross = sum(tot.values()) or 1
             print("  x402 30d: " + ", ".join(
@@ -1047,8 +1078,12 @@ def main() -> int:
     PLACES = {
         "rev": 0, "dex_volume": 0, "defi_tvl": 0, "stablecoin_supply": 0,
         "tokenized_equity_volume": 0, "transactions": 0, "active_addresses": 0,
-        "rev_share": 2, "tx_per_address": 2, "fsr": 2, "fee_vol": 2,
-        "fee_median": 7, "price_perf": 4,
+        "x402_txns": 0, "x402_volume": 2,
+        "rev_share": 2, "tx_per_address": 2, "fsr": 2,
+        # fee_vol is a dollar amount on the same scale as fee_median — sub-cent
+        # on every chain but Ethereum — so two decimals flattened six of the
+        # eight series to zero and quantised the other two into stair steps.
+        "fee_vol": 7, "fee_median": 7, "price_perf": 4,
     }
 
     def round_pts(pts: list, places: int) -> list:

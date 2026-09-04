@@ -531,27 +531,6 @@
 <div id="fsBackdrop"></div>
 <div id="cardModal" role="dialog" aria-modal="true"><button class="tgl" id="cardModalClose">✕ Close</button><div id="cardModalBody"></div></div>
 
-<!-- --------------------------------------------------------- x402 payments -->
-<div class="shead" id="x402Head"><h2>x402 Agentic Payments</h2><span class="rule"></span>
-  <span class="asof" id="x402AsOf"></span></div>
-<section class="grid" id="x402Section">
-  <div class="panel" style="grid-column: 1 / -1;">
-    <div class="crow">
-      <div class="big" id="x402Lead">—</div>
-      <div class="trend-ctl">
-        <button class="tgl" id="x402Usd" aria-pressed="true">Value</button>
-        <button class="tgl" id="x402Tx" aria-pressed="false">Transactions</button>
-      </div>
-    </div>
-    <div class="note" id="x402Sub"></div>
-    <div class="spark" style="height:230px"><canvas id="x402Chart" role="img"
-         aria-label="x402 payment volume by chain"></canvas></div>
-    <div class="legend" id="x402Legend" style="margin-top:10px"></div>
-    <div class="note" id="x402Note" style="margin-top:11px"></div>
-    <div class="dlrow"><button class="tgl dlbtn" id="x402Dl" title="Download this chart as PNG">⤓ PNG</button></div>
-  </div>
-</section>
-
 <!-- ------------------------------------------------- SOL monthly seasonality -->
 <div class="shead"><h2>SOL Monthly Returns Since Inception</h2><span class="rule"></span>
   <button class="tgl" id="seasonDl" title="Download as PNG">⤓ PNG</button></div>
@@ -993,6 +972,10 @@ const TRENDS = [
   { key: 'tx_per_address', compare: 'tx_per_address', title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
     tip: '<b>In simple terms:</b> successful transactions divided by active wallets — how intensively the average wallet uses a chain each day.<br><br><b>Why it matters:</b> it separates chains people visit from chains people <i>use</i>. A high number means wallets transacting repeatedly, the pattern behind trading, payments and apps rather than one-off transfers. Automated traders lift this on the busiest chains.' },
   { key: 'ytd_transactions', compare: 'transactions', title: 'Transactions', color: '#38BDF8', fmt: compact, agg: 'sum' },
+  { key: 'x402_txns', compare: 'x402_txns', title: 'x402 Agentic Payments', color: '#14F195', fmt: compact, agg: 'sum',
+    tip: '<b>In simple terms:</b> x402 is the HTTP-native standard an AI agent uses to pay for an API call, settled in USDC. This counts those payments.<br><br><b>Why it matters:</b> it is the earliest visible measure of machines paying machines onchain, and Solana settles more of them than every other chain combined. Read it carefully: the traffic is concentrated in a handful of gateway operators with few distinct buyers, so treat it as an experiment finding its feet rather than broad demand. Source publishes a rolling 30-day window only, and daily figures are apportioned from 15-hour buckets.' },
+  { key: 'x402_volume', compare: 'x402_volume', title: 'x402 Payment Value', color: '#F5A524', fmt: usd, agg: 'sum',
+    tip: '<b>In simple terms:</b> the dollar value moved by those agent payments, rather than how many there were.<br><br><b>Why it matters:</b> it is the honest counterweight to the payment count. The average x402 payment is a few cents, so a chain can lead on volume of payments while trailing badly on value — and Solana does exactly that. Same 30-day window and same daily apportionment as the count.' },
   // Average transactions per second: the bucket's MEAN daily count over 86,400.
   // Taking the mean (not the sum) keeps this correct at every aggregation
   // level, including a partial current week or month.
@@ -1652,7 +1635,6 @@ async function loadData() {
     renderYield(d.yield_products);
     renderNews(d.news);
     renderSeason(d.monthly_returns);
-    renderX402(d.x402);
     renderMarquee(d.news);
 
     if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
@@ -2546,110 +2528,6 @@ function renderUptime() {
   const days = Math.floor((now - Date.parse(last.date + 'T00:00:00Z')) / 86400000);
   $('lastOutage').textContent =
     `past 30 days · last outage ${fmtDate(last.date)} (${nf(days)} days ago)`;
-}
-
-/* ---------------------------------------------------- x402 agentic payments */
-/* x402scan only materialises 1/7/30-day bucket tables, so 30 days at 15-hour
-   granularity is the entire history that exists — this cannot become a trend
-   card with a range selector. Value and transactions tell different stories
-   (Base leads on dollars, Solana on count), so both are one click apart. */
-const X402_ORDER = ['solana', 'base', 'polygon', 'optimism'];
-let x402Chart = null;
-const x402 = { metric: 'usd', data: null };
-
-function renderX402(d) {
-  const chains = d?.chains || {};
-  const keys = X402_ORDER.filter(k => chains[k]?.length);
-  // Set both ways: a refresh that recovers the upstream feed should bring the
-  // section back, not leave it hidden from an earlier failure.
-  $('x402Head').style.display = keys.length ? '' : 'none';
-  $('x402Section').style.display = keys.length ? '' : 'none';
-  if (!keys.length) return;
-  x402.data = d;
-  const meta = k => CHAINS.find(c => c.key === k) ||
-    { key: k, name: k[0].toUpperCase() + k.slice(1), color: '#8FA5D4', width: 1.3 };
-
-  const total = m => keys.reduce((s, k) => s + chains[k].reduce((a, p) => a + p[m], 0), 0);
-  const chainTotal = (k, m) => chains[k].reduce((a, p) => a + p[m], 0);
-  const last = chains[keys[0]][chains[keys[0]].length - 1];
-  $('x402AsOf').textContent = `trailing ${d.window_days || 30} days · to ${fmtDate(last.t.slice(0, 10))}`;
-
-  function draw() {
-    const m = x402.metric;
-    const fmt = v => m === 'usd' ? compact(v, '$') : compact(v);
-    const share = chainTotal('solana', m) / (total(m) || 1) * 100;
-    $('x402Lead').innerHTML = '';
-    $('x402Lead').textContent = `Solana ${nf(share, 0)}% of ${m === 'usd' ? 'value' : 'payments'}`;
-    $('x402Lead').className = 'big ' + (share >= 50 ? 'up' : '');
-    $('x402Sub').textContent = keys.map(k => `${meta(k).name} ${fmt(chainTotal(k, m))}`).join(' · ')
-      + ` · ${price(total('usd') / (total('tx') || 1))} average payment`;
-
-    const datasets = keys.map(k => ({
-      label: meta(k).name,
-      data: chains[k].map(p => ({ x: p.t, y: p[m] })),
-      borderColor: meta(k).color,
-      backgroundColor: meta(k).color + '22',
-      borderWidth: meta(k).width, pointRadius: 0, tension: 0.25, fill: true,
-    }));
-    if (x402Chart) x402Chart.destroy();
-    x402Chart = new Chart($('x402Chart'), {
-      type: 'line',
-      data: { datasets },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        interaction: { mode: 'index', intersect: false },
-        scales: {
-          x: { type: 'time', time: { unit: 'day' }, grid: { display: false },
-               border: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } },
-          y: { beginAtZero: true, grid: gridCfg, border: { display: false },
-               ticks: { maxTicksLimit: 5, font: { size: 10 }, callback: fmt } },
-        },
-        plugins: { legend: { display: false },
-                   tooltip: { ...tooltipCfg, callbacks: { label: c => `${c.dataset.label}: ${fmt(c.parsed.y)}` } } },
-      },
-    });
-
-    const leg = $('x402Legend');
-    leg.textContent = '';
-    for (const k of keys) {
-      const s = document.createElement('span');
-      s.className = 'leg';
-      const sw = document.createElement('span');
-      sw.className = 'sw';
-      sw.style.background = meta(k).color;
-      s.append(sw, document.createTextNode(`${meta(k).name} ${fmt(chainTotal(k, m))}`));
-      leg.appendChild(s);
-    }
-  }
-
-  // The headline number is real but easily misread: x402 traffic is dominated
-  // by a couple of gateway operators, so say so on the card rather than in a
-  // footnote nobody reads.
-  $('x402Note').textContent =
-    'x402 is the HTTP-native payment standard agents use to pay per API call. It is early and '
-    + 'highly concentrated — a single gateway operator accounts for most payments on both chains, '
-    + 'from a small number of distinct buyers — so read this as an experiment finding its feet, '
-    + 'not as broad demand. Counts and value per bucket, via x402scan.';
-
-  for (const [id, m] of [['x402Usd', 'usd'], ['x402Tx', 'tx']]) {
-    $(id).addEventListener('click', () => {
-      x402.metric = m;
-      $('x402Usd').setAttribute('aria-pressed', String(m === 'usd'));
-      $('x402Tx').setAttribute('aria-pressed', String(m === 'tx'));
-      draw();
-    });
-  }
-  $('x402Dl').addEventListener('click', async () => {
-    const m = x402.metric;
-    const fmt = v => m === 'usd' ? compact(v, '$') : compact(v);
-    const items = keys.map(k => ({ label: meta(k).name, color: meta(k).color, val: chainTotal(k, m) }));
-    await dfdvLogo();
-    const cv = await buildShareImage(snapshotChart(x402Chart),
-      `x402 Payments by Chain — ${m === 'usd' ? 'Value' : 'Transactions'}`,
-      $('x402AsOf').textContent, items, fmt);
-    if (cv) saveCanvas(cv, `state-of-solana-x402-${m}.png`);
-  });
-  draw();
 }
 
 /* ------------------------------------------------- monthly highlights tabs */
