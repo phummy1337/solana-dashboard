@@ -123,6 +123,9 @@
 
   .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 18px 48px 0; }
   .ctl-label { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--mute); margin-right: 2px; }
+  /* keeps a label with its control: wrapping between them stranded "INTERVAL"
+     at the end of one row and its dropdown at the start of the next */
+  .ctl-group { display: inline-flex; align-items: center; gap: 10px; }
   .spacer { flex: 1 1 0; }
   button.tgl { font-family: Syne; font-size: 14px; font-weight: 700; color: var(--peri); background: var(--panel);
                border: 1px solid rgba(143,165,212,0.2); border-radius: 20px; padding: 7px 16px; cursor: pointer; }
@@ -477,32 +480,38 @@
     <div class="shead"><h2>SOL Price History</h2><span class="rule"></span>
       <button class="tgl" id="priceFs" title="Expand the chart">⛶ Expand</button></div>
     <div class="controls">
-      <span class="ctl-label">Range</span>
-      <select class="rsel" id="priceRange" aria-label="Time period">
-        <option value="30">1M</option>
-        <option value="90">3M</option>
-        <option value="ytd">YTD</option>
-        <option value="365">1Y</option>
-        <option value="1826">5Y</option>
-        <option value="all" selected>All</option>
-        <option value="custom">Custom</option>
-      </select>
-      <input type="date" class="rsel dsel" id="priceFrom" aria-label="Start date" style="display:none">
-      <span class="ctl-label">Interval</span>
-      <select class="rsel" id="priceAgg" aria-label="Candle interval">
-        <option value="d">Daily</option>
-        <option value="w" selected>Weekly</option>
-        <option value="m">Monthly</option>
-        <option value="y">Yearly</option>
-      </select>
-      <button class="tgl" id="rainbowBtn" aria-pressed="true" style="margin-left:10px">🌈 SOL Rainbow</button>
+      <span class="ctl-group">
+        <span class="ctl-label">Range</span>
+        <select class="rsel" id="priceRange" aria-label="Time period">
+          <option value="30">1M</option>
+          <option value="90">3M</option>
+          <option value="ytd">YTD</option>
+          <option value="365">1Y</option>
+          <option value="1826">5Y</option>
+          <option value="all" selected>All</option>
+          <option value="custom">Custom</option>
+        </select>
+        <input type="date" class="rsel dsel" id="priceFrom" aria-label="Start date" style="display:none">
+      </span>
+      <span class="ctl-group">
+        <span class="ctl-label">Interval</span>
+        <select class="rsel" id="priceAgg" aria-label="Candle interval">
+          <option value="d">Daily</option>
+          <option value="w" selected>Weekly</option>
+          <option value="m">Monthly</option>
+          <option value="y">Yearly</option>
+        </select>
+      </span>
+      <button class="tgl" id="rainbowBtn" aria-pressed="true">🌈 SOL Rainbow</button>
       <button class="tgl" id="leveredBtn" aria-pressed="false">⚡ Levered SOL</button>
       <span class="spacer"></span>
-      <span class="ctl-label">Scale</span>
-      <select class="rsel" id="priceScale" aria-label="Axis scale">
-        <option value="linear">Linear</option>
-        <option value="logarithmic" selected>Log</option>
-      </select>
+      <span class="ctl-group">
+        <span class="ctl-label">Scale</span>
+        <select class="rsel" id="priceScale" aria-label="Axis scale">
+          <option value="linear">Linear</option>
+          <option value="logarithmic" selected>Log</option>
+        </select>
+      </span>
     </div>
     <section class="stage">
       <div class="wrap"><canvas id="priceChart" role="img" aria-label="SOL price history"></canvas></div>
@@ -1749,11 +1758,25 @@ function drawPrice() {
   // candles into the bottom eighth of the plot. Padding is wider with the
   // rainbow up so the neighbouring bands still frame the price.
   if (cands.length) {
-    const lo = Math.min(...cands.map(c => c.l)), hi = Math.max(...cands.map(c => c.h));
+    const loC = Math.min(...cands.map(c => c.l)), hiC = Math.max(...cands.map(c => c.h));
     const [down, up] = state.rainbow ? [1.8, 2.0] : [1.12, 1.12];
-    if (state.scale === 'logarithmic') { y.min = lo / down; y.max = hi * up; }
-    else { const pad = (hi - lo) * (state.rainbow ? 0.9 : 0.12);
-           y.min = Math.max(0, lo - pad); y.max = hi + pad; }
+    let lo, hi;
+    if (state.scale === 'logarithmic') { lo = loC / down; hi = hiC * up; }
+    else { const pad = (hiC - loC) * (state.rainbow ? 0.9 : 0.12);
+           lo = Math.max(0, loC - pad); hi = hiC + pad; }
+    // At "All" the point is the whole power-law picture, so let the bands
+    // finish rather than clipping the top one in mid-air. Zoomed in, the price
+    // is the subject and the bands are context, so they stay clipped.
+    if (state.rainbow && state.range === 'all') {
+      for (const ds of sets) {
+        if (ds === priceDs) continue;
+        for (const p of ds.data) { if (p.y < lo) lo = p.y; if (p.y > hi) hi = p.y; }
+      }
+    }
+    // Round the bounds off, or the axis labels its own limits verbatim and the
+    // corners read "$537.9064" and "$0.7167777777777777".
+    y.min = niceBound(lo, 'down');
+    y.max = niceBound(hi, 'up');
   } else { delete y.min; delete y.max; }
   priceChart.options.scales.x.time.unit = pts.length > 400 ? 'year' : pts.length > 120 ? 'month' : 'week';
   priceChart.update();
@@ -1768,6 +1791,22 @@ function drawPrice() {
   ).join('') : '';
   leg.innerHTML =
     `<span class="leg"><span class="sw candle"></span>SOL ${AGG_LABEL[state.agg]}</span>` + bandChips;
+}
+
+/* Snap an axis bound to a round step so the corner labels read as prices rather
+   than as whatever the padding arithmetic happened to produce. The ladder is
+   deliberately finer than 1/2/5: on a log axis those jumps are big enough to
+   double the headroom and undo the framing the padding just chose. */
+const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 9, 10];
+function niceBound(v, dir) {
+  if (!isFinite(v) || v <= 0) return 0;
+  const e = Math.floor(Math.log10(v)), m = v / 10 ** e;
+  const step = dir === 'down'
+    ? [...NICE_STEPS].reverse().find(s => s <= m + 1e-9)
+    : NICE_STEPS.find(s => s >= m - 1e-9);
+  // toPrecision: 1.2 * 10**-1 lands on 0.12000000000000001, which the axis
+  // would then print in full
+  return Number((step * 10 ** e).toPrecision(6));
 }
 
 const AGG_LABEL = { d: 'daily', w: 'weekly', m: 'monthly', y: 'yearly' };
