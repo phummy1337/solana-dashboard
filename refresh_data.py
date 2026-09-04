@@ -88,22 +88,6 @@ def get(url: str, headers: dict | None = None, tries: int = 3) -> dict | list:
     raise RuntimeError(f"GET {url.split('?')[0]} failed: {last}")
 
 
-def post_json(url: str, body: dict, tries: int = 3) -> dict | list:
-    data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, headers={
-        "User-Agent": UA, "Accept": "application/json", "Content-Type": "application/json"})
-    last = None
-    for attempt in range(tries):
-        try:
-            with urllib.request.urlopen(req, timeout=90, context=_SSL_CTX) as r:
-                return json.loads(r.read().decode())
-        except Exception as e:  # noqa: BLE001 - retry any transport/parse failure
-            last = e
-            if attempt < tries - 1:
-                time.sleep(2 * (attempt + 1))
-    raise RuntimeError(f"POST {url.split('?')[0]} failed: {last}")
-
-
 def bw(path: str, **params) -> dict | list:
     if not BW_KEY:
         raise RuntimeError("BLOCKWORKS_API_KEY is not set")
@@ -928,76 +912,6 @@ def main() -> int:
         except Exception:  # noqa: BLE001 - first run or unreadable
             pass
 
-    # ------------------------------------------------------- x402 by chain
-    # x402scan's own dashboard runs on this tRPC endpoint. It is undocumented
-    # and unversioned, so treat a failure as routine and keep the last good
-    # copy: the section hides itself rather than breaking the page.
-    #
-    # Only three bucket tables exist upstream (1/7/30 days), so 30 days at 15h
-    # granularity is the whole history available — there is no monthly series to
-    # be had. Amounts are USDC atomic units; /1e6 reconciles with the totals
-    # x402scan prints on its own front page.
-    try:
-        x402: dict = {"chains": {}, "window_days": 30}
-        for chain in ("solana", "base", "polygon", "optimism"):
-            r = post_json(
-                "https://www.x402scan.com/api/trpc/public.stats.bucketed?batch=1",
-                {"0": {"json": {"timeframe": 30, "chain": chain}}})
-            rows = (r[0].get("result", {}).get("data", {}) or {}).get("json")
-            if not isinstance(rows, list):
-                raise RuntimeError(f"unexpected shape for {chain}")
-            pts = [{"t": b["bucket_start"], "tx": b["total_transactions"],
-                    "usd": b["total_amount"] / 1e6, "buyers": b.get("unique_buyers")}
-                   for b in rows]
-            if any(p["tx"] for p in pts):             # skip chains with no activity
-                x402["chains"][chain] = pts
-            time.sleep(1)
-        # Fold the 15-hour buckets into calendar days so the cross-chain cards,
-        # which all speak daily {d, v}, can carry this. A bucket straddling
-        # midnight is split across the days it covers in proportion to the hours
-        # in each: a day is therefore an allocation, while window totals stay
-        # exact. Assigning a whole bucket to its start date instead would give
-        # some days two buckets and some one.
-        def x402_daily(points: list, field: str) -> list:
-            out: dict = {}
-            covered: dict = {}
-            for i, p in enumerate(points):
-                start = datetime.fromisoformat(p["t"].replace("Z", "+00:00"))
-                end = (datetime.fromisoformat(points[i + 1]["t"].replace("Z", "+00:00"))
-                       if i + 1 < len(points) else start + timedelta(hours=15))
-                span = (end - start).total_seconds() or 1
-                cur = start
-                while cur < end:
-                    nxt = min(end, (cur + timedelta(days=1)).replace(
-                        hour=0, minute=0, second=0, microsecond=0))
-                    day = cur.date().isoformat()
-                    secs = (nxt - cur).total_seconds()
-                    out[day] = out.get(day, 0) + p[field] * (secs / span)
-                    covered[day] = covered.get(day, 0) + secs
-                    cur = nxt
-            # Keep only days the rolling window covers end to end. Its first and
-            # last days are clipped, so they would always read low and drag the
-            # newest point of every chart down with them.
-            return [{"d": k, "v": v} for k, v in sorted(out.items()) if covered[k] >= 86_000]
-
-        if x402["chains"]:
-            data["x402"] = x402
-            for field, key in (("tx", "x402_txns"), ("usd", "x402_volume")):
-                compare[key] = {ch: x402_daily(pts, field)
-                                for ch, pts in x402["chains"].items()}
-            tot = {c: sum(p["usd"] for p in v) for c, v in x402["chains"].items()}
-            gross = sum(tot.values()) or 1
-            print("  x402 30d: " + ", ".join(
-                f"{c} ${v:,.0f} ({v / gross * 100:.0f}%)" for c, v in sorted(
-                    tot.items(), key=lambda kv: -kv[1])))
-    except Exception as e:  # noqa: BLE001
-        warn(f"x402 by chain: {e}")
-        try:                                          # stale beats absent here
-            if prev_x := json.loads(OUT.read_text()).get("x402"):
-                data["x402"] = prev_x
-        except Exception:  # noqa: BLE001 - first run or unreadable
-            pass
-
     # ------------------------------------------- SOL monthly return seasonality
     # Calendar-month returns since inception: last close of month N versus last
     # close of month N-1, so partial current months are excluded and every cell
@@ -1078,7 +992,6 @@ def main() -> int:
     PLACES = {
         "rev": 0, "dex_volume": 0, "defi_tvl": 0, "stablecoin_supply": 0,
         "tokenized_equity_volume": 0, "transactions": 0, "active_addresses": 0,
-        "x402_txns": 0, "x402_volume": 2,
         "rev_share": 2, "tx_per_address": 2, "fsr": 2,
         # fee_vol is a dollar amount on the same scale as fee_median — sub-cent
         # on every chain but Ethereum — so two decimals flattened six of the

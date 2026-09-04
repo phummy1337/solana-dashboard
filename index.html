@@ -972,10 +972,6 @@ const TRENDS = [
   { key: 'tx_per_address', compare: 'tx_per_address', title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
     tip: '<b>In simple terms:</b> successful transactions divided by active wallets — how intensively the average wallet uses a chain each day.<br><br><b>Why it matters:</b> it separates chains people visit from chains people <i>use</i>. A high number means wallets transacting repeatedly, the pattern behind trading, payments and apps rather than one-off transfers. Automated traders lift this on the busiest chains.' },
   { key: 'ytd_transactions', compare: 'transactions', title: 'Transactions', color: '#38BDF8', fmt: compact, agg: 'sum' },
-  { key: 'x402_txns', compare: 'x402_txns', title: 'x402 Agentic Payments', color: '#14F195', fmt: compact, agg: 'sum',
-    tip: '<b>In simple terms:</b> x402 is the HTTP-native standard an AI agent uses to pay for an API call, settled in USDC. This counts those payments.<br><br><b>Why it matters:</b> it is the earliest visible measure of machines paying machines onchain, and Solana settles more of them than every other chain combined. Read it carefully: the traffic is concentrated in a handful of gateway operators with few distinct buyers, so treat it as an experiment finding its feet rather than broad demand. Source publishes a rolling 30-day window only, and daily figures are apportioned from 15-hour buckets.' },
-  { key: 'x402_volume', compare: 'x402_volume', title: 'x402 Payment Value', color: '#F5A524', fmt: usd, agg: 'sum',
-    tip: '<b>In simple terms:</b> the dollar value moved by those agent payments, rather than how many there were.<br><br><b>Why it matters:</b> it is the honest counterweight to the payment count. The average x402 payment is a few cents, so a chain can lead on volume of payments while trailing badly on value — and Solana does exactly that. Same 30-day window and same daily apportionment as the count.' },
   // Average transactions per second: the bucket's MEAN daily count over 86,400.
   // Taking the mean (not the sum) keeps this correct at every aggregation
   // level, including a partial current week or month.
