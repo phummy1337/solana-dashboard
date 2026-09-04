@@ -768,6 +768,7 @@ const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
                 rainbow: true, preRainbowScale: 'linear',
                 agg: 'w', from: null, levered: false, dfdv: null,
+                preLeverAgg: 'w', preLeverScale: 'logarithmic',
                 trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
                 trendHidden: {}, trendAggs: {}, trendFrom: {}, trendSeries: {}, trendCompare: {} };
 
@@ -2125,6 +2126,10 @@ document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click'
   state.mode = b.dataset.mode;
   renderTiles();
 }));
+function setAgg(agg) {
+  state.agg = agg;
+  $('priceAgg').value = agg;
+}
 function setScale(scale) {
   // guards the rainbow toggle's restore path: preRainbowScale is undefined
   // until the rainbow has been switched on at least once
@@ -2170,9 +2175,21 @@ $('rainbowBtn').addEventListener('click', () => {
 $('leveredBtn').addEventListener('click', () => {
   state.levered = !state.levered;
   $('leveredBtn').setAttribute('aria-pressed', String(state.levered));
-  if (state.levered && state.rainbow) {      // one overlay at a time: $ vs %
-    state.rainbow = false;
-    $('rainbowBtn').setAttribute('aria-pressed', 'false');
+  if (state.levered) {
+    if (state.rainbow) {                     // one overlay at a time: $ vs %
+      state.rainbow = false;
+      $('rainbowBtn').setAttribute('aria-pressed', 'false');
+    }
+    // Daily is the readable resolution over a window this short. Remember what
+    // the candle view was using: daily candles across five years are a smear,
+    // and drawLevered forces a linear axis that the price chart doesn't want
+    // back either.
+    state.preLeverAgg = state.agg;
+    state.preLeverScale = state.scale;
+    setAgg('d');
+  } else {
+    setAgg(state.preLeverAgg || 'w');
+    setScale(state.preLeverScale || 'logarithmic');
   }
   syncPriceControls();
   drawPrice();
