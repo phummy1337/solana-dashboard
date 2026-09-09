@@ -961,7 +961,25 @@ def main() -> int:
                         "pos": sum(1 for v in vals if v > 0),
                         "n": len(vals),
                     }
-            data["monthly_returns"] = {"grid": grid, "stats": stats_by_month}
+            # The month in progress, kept out of `grid` on purpose: it belongs on
+            # the page as month-to-date, but folding a partial month into the
+            # averages, medians and hit rates below would corrupt every one of
+            # them. Consumers that want only closed months read `grid` and are
+            # unaffected by this.
+            mtd = None
+            if months:
+                cur = months[-1]
+                prev_m = months[-2] if len(months) > 1 else None
+                py, pm = (int(prev_m[:4]), int(prev_m[5:])) if prev_m else (0, 0)
+                consecutive = prev_m and (py + (pm == 12), (pm % 12) + 1) == (
+                    int(cur[:4]), int(cur[5:]))
+                if not _complete(cur) and consecutive and month_close[prev_m]:
+                    mtd = {"m": cur, "as_of": month_last_day[cur],
+                           "v": (month_close[cur] / month_close[prev_m] - 1) * 100}
+                    print(f"  month to date: {cur} {mtd['v']:+.1f}% "
+                          f"through {mtd['as_of']}")
+
+            data["monthly_returns"] = {"grid": grid, "stats": stats_by_month, "mtd": mtd}
             best = max(stats_by_month.items(), key=lambda kv: kv[1]["med"])
             print(f"  monthly seasonality: {len(grid)} years, best median month "
                   f"= {best[0]} ({best[1]['med']:+.1f}%)")

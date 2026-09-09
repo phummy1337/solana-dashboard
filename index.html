@@ -360,6 +360,8 @@
   .stable th.yr, .stable td.yr { text-align: left; color: var(--ink); font-weight: 700; padding-left: 2px; }
   .stable td { padding: 5px 4px; text-align: center; font-weight: 600; border-radius: 4px; white-space: nowrap; }
   .stable tr.sep td, .stable tr.sep th { border-top: 1px solid var(--line); }
+  /* the month still running: same heat colour, dashed so it reads as provisional */
+  .stable td.mtd { outline: 1px dashed rgba(241,245,251,0.65); outline-offset: -3px; }
   .stable tr.agg td, .stable tr.agg th.yr { font-weight: 800; color: var(--ink); }
   .stable td.na { color: rgba(143,165,212,0.35); }
 
@@ -2367,22 +2369,42 @@ const heatBg = v => v == null ? 'transparent'
             : `rgba(255,107,107,${Math.min(Math.abs(v) / 60, 1) * 0.5 + 0.05})`);
 const cellTxt = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
 
+/* Closed months plus the one in progress. They arrive separately so the
+   averages, medians and hit rates are computed on closed months alone; both
+   renderers want them together, and both need to know which cell is the
+   provisional one. */
+function seasonRows(md) {
+  const rows = {};
+  for (const [y, r] of Object.entries(md.grid)) rows[y] = { ...r };
+  const m = md.mtd;
+  if (!m) return { rows, mtdYear: null, mtdMonth: null, asOf: null };
+  const y = m.m.slice(0, 4), mo = +m.m.slice(5);
+  (rows[y] ||= {})[mo] = m.v;
+  return { rows, mtdYear: y, mtdMonth: mo, asOf: m.as_of };
+}
+
 function renderSeason(md) {
   if (!md?.grid || !Object.keys(md.grid).length) return;
   seasonData = md;
-  const years = Object.keys(md.grid).sort();
+  const { rows: gridRows, mtdYear, mtdMonth, asOf } = seasonRows(md);
+  const years = Object.keys(gridRows).sort();
   const t = $('seasonTable');
   let html = '<thead><tr><th class="yr">Year</th>' +
     MONTHS.map(m => `<th>${m}</th>`).join('') + '<th>Year</th></tr></thead><tbody>';
   for (const y of years) {
-    const row = md.grid[y];
-    // compound the year's completed months
-    const yearVal = Object.values(row).reduce((a, v) => a * (1 + v / 100), 1);
-    const yv = Object.keys(row).length ? (yearVal - 1) * 100 : null;
+    const row = gridRows[y];
+    // The year column compounds closed months only, so it keeps meaning the
+    // same thing in every row rather than turning into year-to-date for one.
+    const closed = md.grid[y] || {};
+    const yearVal = Object.values(closed).reduce((a, v) => a * (1 + v / 100), 1);
+    const yv = Object.keys(closed).length ? (yearVal - 1) * 100 : null;
     html += `<tr><td class="yr">${y}</td>` + MONTHS.map((_, i) => {
       const v = row[i + 1];
-      return v == null ? '<td class="na">—</td>'
-        : `<td style="background:${heatBg(v)}">${cellTxt(v)}</td>`;
+      if (v == null) return '<td class="na">—</td>';
+      const live = y === mtdYear && i + 1 === mtdMonth;
+      return `<td class="${live ? 'mtd' : ''}" style="background:${heatBg(v)}"` +
+        (live ? ` title="Month to date through ${fmtDate(asOf)}"` : '') +
+        `>${cellTxt(v)}</td>`;
     }).join('') + `<td style="background:${heatBg(yv)}"><b>${cellTxt(yv)}</b></td></tr>`;
   }
   const st = md.stats || {};
@@ -2406,7 +2428,11 @@ function renderSeason(md) {
     `Monthly close-to-close returns since ${years[0]}. Strongest month by median: ` +
     `${MONTHS[best[0] - 1]} (${cellTxt(best[1].med)}, positive ${best[1].pos} of ${best[1].n} years); ` +
     `weakest: ${MONTHS[worst[0] - 1]} (${cellTxt(worst[1].med)}). ` +
-    `The current month is excluded until it closes. Past performance does not predict future returns.`;
+    (mtdMonth
+      ? `${MONTHS[mtdMonth - 1]} is month to date through ${fmtDate(asOf)} (dashed) and is ` +
+        `excluded from the year, average, median and positive rows until it closes. `
+      : `The current month is excluded until it closes. `) +
+    `Past performance does not predict future returns.`;
 }
 
 /* Draws the grid as a branded PNG — the table is DOM, not a chart, so it gets
@@ -2415,7 +2441,8 @@ async function downloadSeasonImage() {
   const md = seasonData;
   if (!md) return;
   const logo = await dfdvLogo();
-  const years = Object.keys(md.grid).sort();
+  const { rows: gridRows, mtdYear, mtdMonth } = seasonRows(md);
+  const years = Object.keys(gridRows).sort();
   const S = 2, PAD = 48, colW = 92, yrW = 86, rowH = 34, headH = 132;
   const W = PAD * 2 + yrW + colW * 13;
   const rows = years.length + 3;
@@ -2459,13 +2486,21 @@ async function downloadSeasonImage() {
 
   let y = headH + 14;
   for (const yr of years) {
-    const row = md.grid[yr];
+    const row = gridRows[yr];
     g.fillStyle = '#F1F5FB'; g.textAlign = 'left';
     g.font = '700 16px ui-sans-serif, system-ui, sans-serif';
     g.fillText(yr, PAD, y + 22);
-    MONTHS.forEach((_, i) => drawCell(cellX(i), y, row[i + 1] ?? null));
-    const compounded = Object.values(row).reduce((a, v) => a * (1 + v / 100), 1);
-    drawCell(cellX(12), y, Object.keys(row).length ? (compounded - 1) * 100 : null, true);
+    MONTHS.forEach((_, i) => {
+      drawCell(cellX(i), y, row[i + 1] ?? null);
+      if (yr === mtdYear && i + 1 === mtdMonth) {     // mark it provisional
+        g.strokeStyle = 'rgba(241,245,251,0.65)'; g.lineWidth = 1; g.setLineDash([4, 3]);
+        g.strokeRect(cellX(i) + 4, y + 4, colW - 8, rowH - 8);
+        g.setLineDash([]);
+      }
+    });
+    const closed = md.grid[yr] || {};
+    const compounded = Object.values(closed).reduce((a, v) => a * (1 + v / 100), 1);
+    drawCell(cellX(12), y, Object.keys(closed).length ? (compounded - 1) * 100 : null, true);
     y += rowH;
   }
   g.strokeStyle = 'rgba(143,165,212,0.25)';
