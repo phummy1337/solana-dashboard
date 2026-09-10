@@ -54,13 +54,16 @@ CHARTS = {
 # Per-metric lists because one invalid slug 400s the whole Blockworks request —
 # tron/polygon/aptos have no dex-spot-volume series, for example.
 CHAINS_ALL = ["solana", "ethereum", "base", "arbitrum", "bnb", "avalanche",
-              "sui", "tron", "hyperevm", "polygon"]
+              "sui", "tron", "hyperevm", "polygon", "robinhood"]
+# Robinhood Chain launched 2026-04-30, so its series simply start later than
+# the rest; it has no stablecoin-supply series at all and is dropped from that
+# card on its own, since compare_metric omits a chain that returns nothing.
 CHAINS_DEX = ["solana", "ethereum", "base", "arbitrum", "bnb", "avalanche",
-              "sui", "hyperevm"]
+              "sui", "hyperevm", "robinhood"]
 LLAMA_SLUGS = {"solana": "Solana", "ethereum": "Ethereum", "base": "Base",
                "arbitrum": "Arbitrum", "bnb": "BSC", "avalanche": "Avalanche",
                "sui": "Sui", "tron": "Tron", "hyperevm": "Hyperliquid",
-               "polygon": "Polygon"}
+               "polygon": "Polygon", "robinhood": "Robinhood Chain"}
 
 warnings: list[str] = []
 
@@ -539,7 +542,10 @@ def main() -> int:
     try:
         out = {}
         for chain, slug in LLAMA_SLUGS.items():
-            rows = get(f"https://api.llama.fi/v2/historicalChainTvl/{slug}")
+            # "Robinhood Chain" is the first slug here with a space in it, and
+            # an unencoded one fails before the request is even sent.
+            rows = get("https://api.llama.fi/v2/historicalChainTvl/"
+                       + urllib.parse.quote(slug))
             pts = [{"d": datetime.fromtimestamp(r["date"], tz=timezone.utc).date().isoformat(),
                     "v": r["tvl"]}
                    for r in rows if r.get("tvl")]

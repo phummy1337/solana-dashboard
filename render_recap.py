@@ -47,7 +47,8 @@ CHAIN_COLOR = {"solana": (20, 241, 149), "ethereum": (143, 165, 212),
                "base": (59, 130, 246), "arbitrum": (168, 85, 247),
                "bnb": (240, 185, 11), "avalanche": (232, 65, 66),
                "sui": (56, 189, 248), "tron": (251, 146, 60),
-               "hyperevm": (14, 165, 160), "polygon": (232, 121, 249)}
+               "hyperevm": (14, 165, 160), "polygon": (232, 121, 249),
+               "robinhood": (163, 230, 53)}
 ASSET_COLOR = {"Solana": (20, 241, 149), "Bitcoin": (247, 147, 26),
                "Ethereum": (143, 165, 212), "BNB": (240, 185, 11),
                "Avalanche": (232, 65, 66), "Sui": (56, 189, 248),
@@ -56,11 +57,11 @@ ASSET_COLOR = {"Solana": (20, 241, 149), "Bitcoin": (247, 147, 26),
 CHAIN_SHORT = {"solana": "SOL", "ethereum": "ETH", "base": "BASE",
                "arbitrum": "ARB", "bnb": "BNB", "avalanche": "AVAX",
                "sui": "SUI", "tron": "TRX", "hyperevm": "HYPE",
-               "polygon": "POL"}
+               "polygon": "POL", "robinhood": "HOOD"}
 CHAIN_LABEL = {"solana": "Solana", "ethereum": "Ethereum", "base": "Base",
                "arbitrum": "Arbitrum", "bnb": "BNB", "avalanche": "Avalanche",
                "sui": "Sui", "tron": "Tron", "hyperevm": "Hyperliquid",
-               "polygon": "Polygon"}
+               "polygon": "Polygon", "robinhood": "Robinhood"}
 # CoinGecko asset name -> ticker for the performance panel
 TICKER = {"Solana": "SOL", "Bitcoin": "BTC", "Ethereum": "ETH", "BNB": "BNB",
           "Avalanche": "AVAX", "Sui": "SUI", "Tron": "TRX", "Polygon": "POL",
