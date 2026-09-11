@@ -1100,8 +1100,8 @@ const SHARE_W = 1200, SHARE_PAD = 48, SHARE_CHART_W = SHARE_W - SHARE_PAD * 2;
 // the chart keep most of the height at this ratio. The box is measured before
 // the snapshot so the chart is re-rendered at the size it will occupy, rather
 // than stretched into it, which would smear its axis text.
-const SHARE_H = SHARE_W / 2, SHARE_CHART_TOP = 132;
-const LEG_COL = 220, LEG_GUTTER = 22, LEG_SWATCH = 16;
+const SHARE_H = SHARE_W / 2, SHARE_CHART_TOP = 118, SHARE_FOOT = 52;
+const LEG_COL = 165, LEG_GUTTER = 18, LEG_SWATCH = 12;
 
 function shareLayout(items, fmt) {
   const probe = document.createElement('canvas').getContext('2d');
@@ -1109,20 +1109,20 @@ function shareLayout(items, fmt) {
     x: SHARE_PAD,
     y: SHARE_CHART_TOP,
     w: SHARE_W - SHARE_PAD * 2 - LEG_COL - LEG_GUTTER,
-    h: Math.round(SHARE_H - 64 - 22 - SHARE_CHART_TOP),
+    h: Math.round(SHARE_H - SHARE_FOOT - 16 - SHARE_CHART_TOP),
   };
   // Shrink the legend rather than let a long label overrun the column.
   const txts = items.map(it => it.val != null ? `${it.label} (${fmt(it.val)})` : it.label);
-  let size = 18;
-  for (const s of [18, 16, 14, 12]) {
+  let size = 14;
+  for (const s of [14, 13, 12, 11]) {
     probe.font = `700 ${s}px Syne, sans-serif`;
     size = s;
     if (Math.max(...txts.map(t => probe.measureText(t).width)) <= LEG_COL - LEG_SWATCH - 12) break;
   }
-  const rowH = Math.min(30, Math.floor(chart.h / Math.max(items.length, 1)));
+  const rowH = Math.min(24, Math.floor(chart.h / Math.max(items.length, 1)));
   const x = SHARE_W - SHARE_PAD - LEG_COL;
   const laid = items.map((it, i) => ({
-    txt: txts[i], color: it.color, x, y: chart.y + 16 + i * rowH,
+    txt: txts[i], color: it.color, x, y: chart.y + 13 + i * rowH,
   }));
   return { laid, chart, font: `700 ${size}px Syne, sans-serif` };
 }
@@ -1179,29 +1179,29 @@ async function buildShareImage(src, title, note, items, fmt) {
   for (const p of laid) {
     if (Array.isArray(p.color)) {
       // dual-color candle swatch: diagonal split, up-color over down-color
-      const sz = LEG_SWATCH, sx = p.x, sy = p.y - 12;
+      const sz = LEG_SWATCH, sx = p.x, sy = p.y - 10;
       g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + sz, sy); g.lineTo(sx, sy + sz); g.closePath();
       g.fillStyle = p.color[0]; g.fill();
       g.beginPath(); g.moveTo(sx + sz, sy); g.lineTo(sx + sz, sy + sz); g.lineTo(sx, sy + sz); g.closePath();
       g.fillStyle = p.color[1]; g.fill();
     } else {
-      g.fillStyle = p.color; g.fillRect(p.x, p.y - 9, LEG_SWATCH, 6);
+      g.fillStyle = p.color; g.fillRect(p.x, p.y - 8, LEG_SWATCH, 5);
     }
-    g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + LEG_SWATCH + 10, p.y);
+    g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + LEG_SWATCH + 8, p.y);
   }
 
   // The domain is the whole point of sharing the card, so it gets the loudest
   // type on it after the title, on the same orange ramp as the site's mark.
-  const fy = H - 66;
+  const fy = H - SHARE_FOOT;
   g.strokeStyle = 'rgba(143,165,212,0.15)';
   g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
   const cta = 'StateOfSOL.com';
-  g.font = '800 22px Syne, sans-serif';
+  g.font = '800 13px Syne, sans-serif';
   const cw = g.measureText(cta).width, cx = W - PAD - cw;
   const cg = g.createLinearGradient(cx, 0, cx + cw, 0);
   cg.addColorStop(0, '#F5A524'); cg.addColorStop(1, '#ED3D24');
   g.fillStyle = cg;
-  g.fillText(cta, cx, fy + 38);
+  g.fillText(cta, cx, fy + 30);
   return cv;
 }
 
@@ -1219,7 +1219,7 @@ function saveCanvas(cv, name) {
    The card canvas is only ~545 CSS px wide, so the share image was upscaling it
    past 2x — axis labels came out soft and small. Bump the backing store and the
    tick size for one frame, copy the pixels out, then put it straight back. */
-function snapshotChart(chart, targetTickPx = 22, dpr = 4, box = null) {
+function snapshotChart(chart, targetTickPx = 15, dpr = 4, box = null) {
   // Cards differ in on-screen width (and shrink with the window), so a fixed
   // tick size would land at a different size in every download. Solve for the
   // size that renders at targetTickPx once the bitmap is scaled to fit the card.
@@ -1288,7 +1288,7 @@ async function buildTrendImage(key, title, fmt, el) {
   }
   const note = el.querySelector('.note').textContent.trim();
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
-  return buildShareImage(snapshotChart(chart, 22, 4, shareLayout(items, fmt).chart),
+  return buildShareImage(snapshotChart(chart, 15, 4, shareLayout(items, fmt).chart),
                          title, note, items, fmt);
 }
 
@@ -1317,7 +1317,7 @@ async function downloadPriceImage() {
     yOpt().ticks.callback = v => `${v >= 0 ? '+' : ''}${Math.round(v)}%`;
     let snap;
     try {
-      snap = snapshotChart(priceChart, 22, 4, shareLayout(items, pctSigned).chart);
+      snap = snapshotChart(priceChart, 15, 4, shareLayout(items, pctSigned).chart);
     } finally {
       yOpt().position = savedPos;
       drawPrice();                     // puts the live view's ticks back too
@@ -1340,7 +1340,7 @@ async function downloadPriceImage() {
   }
   const title = state.rainbow ? "DFDV's Solana Rainbow Chart" : 'SOL Price History';
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
-  const cv = await buildShareImage(snapshotChart(priceChart, 22, 4, shareLayout(items, price).chart),
+  const cv = await buildShareImage(snapshotChart(priceChart, 15, 4, shareLayout(items, price).chart),
                                    title, note, items, price);
   if (cv) saveCanvas(cv, `state-of-solana-sol-price-${state.range}.png`);
 }
