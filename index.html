@@ -1095,6 +1095,29 @@ function buildTrends() {
 
 /* ------------------------------------------------------ trend card export */
 const SHARE_W = 1200, SHARE_PAD = 48, SHARE_CHART_W = SHARE_W - SHARE_PAD * 2;
+// Cards render at 2:1 — the ratio X shows in-feed without cropping. Height is
+// therefore fixed and the chart takes whatever the legend leaves, which is why
+// the box is measured before the snapshot: the chart is re-rendered at that
+// size rather than stretched into it, which would smear its axis text.
+const SHARE_H = SHARE_W / 2, SHARE_CHART_TOP = 132, SHARE_FOOT = 82;
+const LEG_FONT = '700 19px Syne, sans-serif';
+const LEG_ROW = 36, LEG_SWATCH = 18, LEG_GAP = 24;
+
+function shareLegend(items, fmt) {
+  const probe = document.createElement('canvas').getContext('2d');
+  probe.font = LEG_FONT;
+  let lx = SHARE_PAD, rows = 1;
+  const laid = items.map(it => {
+    const txt = it.val != null ? `${it.label} (${fmt(it.val)})` : it.label;
+    const w = probe.measureText(txt).width + LEG_SWATCH + 10;
+    if (lx + w > SHARE_W - SHARE_PAD) { lx = SHARE_PAD; rows++; }
+    const pos = { txt, x: lx, row: rows, color: it.color };
+    lx += w + LEG_GAP;
+    return pos;
+  });
+  const h = Math.round(SHARE_H - SHARE_CHART_TOP - 34 - rows * LEG_ROW - SHARE_FOOT);
+  return { laid, rows, w: SHARE_CHART_W, h };
+}
 let _dfdvImg = null;
 function dfdvLogo() {
   _dfdvImg ??= new Promise(res => {
@@ -1109,30 +1132,10 @@ function dfdvLogo() {
    DFDV mark top-right, State of Solana + CTA footer. */
 async function buildShareImage(src, title, note, items, fmt) {
   const logo = await dfdvLogo();
-  const S = 2, W = SHARE_W, PAD = SHARE_PAD;
-  const chartW = SHARE_CHART_W;
-  const chartH = Math.round(chartW * src.height / src.width);
-
-  // pre-measure legend wrapping. Sized to read at a glance once the PNG is
-  // posted or dropped in a deck — the old 13px set the legend well below the
-  // axis labels, which land near 20px after the chart bitmap is scaled up.
-  const LEG_FONT = '700 19px Syne, sans-serif';
-  const LEG_ROW = 36, LEG_SWATCH = 18, LEG_GAP = 24;
-  const probe = document.createElement('canvas').getContext('2d');
-  probe.font = LEG_FONT;
-  let lx = PAD, rows = 1;
-  const laid = items.map(it => {
-    const txt = it.val != null ? `${it.label} (${fmt(it.val)})` : it.label;
-    const w = probe.measureText(txt).width + LEG_SWATCH + 10;
-    if (lx + w > W - PAD) { lx = PAD; rows++; }
-    const pos = { txt, x: lx, row: rows, color: it.color };
-    lx += w + LEG_GAP;
-    return pos;
-  });
-
-  const chartTop = 132;
+  const S = 2, W = SHARE_W, PAD = SHARE_PAD, H = SHARE_H;
+  const { laid, rows, w: chartW, h: chartH } = shareLegend(items, fmt);
+  const chartTop = SHARE_CHART_TOP;
   const legendTop = chartTop + chartH + 34;
-  const H = legendTop + rows * LEG_ROW + 82;
   const cv = document.createElement('canvas');
   cv.width = W * S; cv.height = H * S;
   const g = cv.getContext('2d');
@@ -1181,12 +1184,18 @@ async function buildShareImage(src, title, note, items, fmt) {
     g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + LEG_SWATCH + 10, y);
   }
 
-  const fy = H - 58;
+  // The domain is the whole point of sharing the card, so it gets the loudest
+  // type on it after the title, on the same orange ramp as the site's mark.
+  const fy = H - 66;
   g.strokeStyle = 'rgba(143,165,212,0.15)';
   g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
-  g.fillStyle = '#F97316'; g.font = '700 17px Syne, sans-serif';
   const cta = 'StateOfSOL.com';
-  g.fillText(cta, W - PAD - g.measureText(cta).width, fy + 33);
+  g.font = '800 32px Syne, sans-serif';
+  const cw = g.measureText(cta).width, cx = W - PAD - cw;
+  const cg = g.createLinearGradient(cx, 0, cx + cw, 0);
+  cg.addColorStop(0, '#F5A524'); cg.addColorStop(1, '#ED3D24');
+  g.fillStyle = cg;
+  g.fillText(cta, cx, fy + 44);
   return cv;
 }
 
@@ -1204,11 +1213,11 @@ function saveCanvas(cv, name) {
    The card canvas is only ~545 CSS px wide, so the share image was upscaling it
    past 2x — axis labels came out soft and small. Bump the backing store and the
    tick size for one frame, copy the pixels out, then put it straight back. */
-function snapshotChart(chart, targetTickPx = 22, dpr = 4) {
+function snapshotChart(chart, targetTickPx = 22, dpr = 4, box = null) {
   // Cards differ in on-screen width (and shrink with the window), so a fixed
   // tick size would land at a different size in every download. Solve for the
   // size that renders at targetTickPx once the bitmap is scaled to fit the card.
-  const scale = SHARE_CHART_W / (chart.canvas.clientWidth || SHARE_CHART_W);
+  const scale = box ? 1 : SHARE_CHART_W / (chart.canvas.clientWidth || SHARE_CHART_W);
   const tickPx = Math.max(9, Math.round(targetTickPx / scale));
   // update() rebuilds the per-scale font objects, so the path has to be
   // re-walked for every write — caching the reference means the restore lands
@@ -1234,7 +1243,8 @@ function snapshotChart(chart, targetTickPx = 22, dpr = 4) {
   try {
     chart.config.options.devicePixelRatio = dpr;
     setSizes(() => tickPx);
-    chart.resize(); chart.update('none');
+    if (box) chart.resize(box.w, box.h); else chart.resize();
+    chart.update('none');
     // charts that declare an animation (the price chart does) defer their paint
     // to rAF, so update() alone would leave an empty canvas to copy
     chart.draw();
@@ -1272,7 +1282,8 @@ async function buildTrendImage(key, title, fmt, el) {
   }
   const note = el.querySelector('.note').textContent.trim();
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
-  return buildShareImage(snapshotChart(chart), title, note, items, fmt);
+  return buildShareImage(snapshotChart(chart, 22, 4, shareLegend(items, fmt)),
+                         title, note, items, fmt);
 }
 
 async function downloadTrendImage(key, title, fmt, el, range) {
@@ -1300,7 +1311,7 @@ async function downloadPriceImage() {
     yOpt().ticks.callback = v => `${v >= 0 ? '+' : ''}${Math.round(v)}%`;
     let snap;
     try {
-      snap = snapshotChart(priceChart);
+      snap = snapshotChart(priceChart, 22, 4, shareLegend(items, pctSigned));
     } finally {
       yOpt().position = savedPos;
       drawPrice();                     // puts the live view's ticks back too
@@ -1323,7 +1334,8 @@ async function downloadPriceImage() {
   }
   const title = state.rainbow ? "DFDV's Solana Rainbow Chart" : 'SOL Price History';
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
-  const cv = await buildShareImage(snapshotChart(priceChart), title, note, items, price);
+  const cv = await buildShareImage(snapshotChart(priceChart, 22, 4, shareLegend(items, price)),
+                                   title, note, items, price);
   if (cv) saveCanvas(cv, `state-of-solana-sol-price-${state.range}.png`);
 }
 
