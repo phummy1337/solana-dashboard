@@ -1111,20 +1111,38 @@ function shareLayout(items, fmt) {
     w: SHARE_W - SHARE_PAD * 2 - LEG_COL - LEG_GUTTER,
     h: Math.round(SHARE_H - SHARE_FOOT - 16 - SHARE_CHART_TOP),
   };
+  // Rank by value like the on-screen legends do. The export was taking dataset
+  // order, so the same card's two legends listed the chains differently.
+  const ranked = [...items].sort((a, b) => (b.val ?? -Infinity) - (a.val ?? -Infinity));
   // Shrink the legend rather than let a long label overrun the column.
-  const txts = items.map(it => it.val != null ? `${it.label} (${fmt(it.val)})` : it.label);
+  const txts = ranked.map(it => it.val != null ? `${it.label} (${fmt(it.val)})` : it.label);
   let size = 14;
   for (const s of [14, 13, 12, 11]) {
     probe.font = `700 ${s}px Syne, sans-serif`;
     size = s;
     if (Math.max(...txts.map(t => probe.measureText(t).width)) <= LEG_COL - LEG_SWATCH - 12) break;
   }
-  const rowH = Math.min(24, Math.floor(chart.h / Math.max(items.length, 1)));
+  const rowH = Math.min(24, Math.floor(chart.h / Math.max(ranked.length, 1)));
   const x = SHARE_W - SHARE_PAD - LEG_COL;
-  const laid = items.map((it, i) => ({
+  const laid = ranked.map((it, i) => ({
     txt: txts[i], color: it.color, x, y: chart.y + 13 + i * rowH,
   }));
   return { laid, chart, font: `700 ${size}px Syne, sans-serif` };
+}
+
+/* The domain, right-aligned on x, on the same orange ramp as the site's mark.
+   Set in the neutral sans rather than Syne: Syne's heavy cuts are very wide and
+   its round letters close up at small sizes, which made the wordmark the least
+   legible thing on a card whose whole job is carrying it. */
+function drawWordmark(g, right, baseline, px) {
+  const txt = 'StateOfSOL.com';
+  g.textAlign = 'left';
+  g.font = `700 ${px}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  const w = g.measureText(txt).width, x = right - w;
+  const grad = g.createLinearGradient(x, 0, x + w, 0);
+  grad.addColorStop(0, '#F5A524'); grad.addColorStop(1, '#ED3D24');
+  g.fillStyle = grad;
+  g.fillText(txt, x, baseline);
 }
 
 let _dfdvImg = null;
@@ -1190,18 +1208,10 @@ async function buildShareImage(src, title, note, items, fmt) {
     g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + LEG_SWATCH + 8, p.y);
   }
 
-  // The domain is the whole point of sharing the card, so it gets the loudest
-  // type on it after the title, on the same orange ramp as the site's mark.
   const fy = H - SHARE_FOOT;
   g.strokeStyle = 'rgba(143,165,212,0.15)';
   g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
-  const cta = 'StateOfSOL.com';
-  g.font = '800 13px Syne, sans-serif';
-  const cw = g.measureText(cta).width, cx = W - PAD - cw;
-  const cg = g.createLinearGradient(cx, 0, cx + cw, 0);
-  cg.addColorStop(0, '#F5A524'); cg.addColorStop(1, '#ED3D24');
-  g.fillStyle = cg;
-  g.fillText(cta, cx, fy + 30);
+  drawWordmark(g, W - PAD, fy + 30, 14);
   return cv;
 }
 
@@ -2538,8 +2548,7 @@ async function downloadSeasonImage() {
   g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
   g.textAlign = 'left'; g.fillStyle = '#6B7FAB'; g.font = '600 13px Syne, sans-serif';
   g.fillText('State of Solana', PAD, fy + 32);
-  g.textAlign = 'right'; g.fillStyle = '#F97316'; g.font = '700 15px Syne, sans-serif';
-  g.fillText('Visit stateofsol.com →', W - PAD, fy + 33);
+  drawWordmark(g, W - PAD, fy + 33, 15);
   saveCanvas(cv, 'state-of-solana-monthly-returns.png');
 }
 
