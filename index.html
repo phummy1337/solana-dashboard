@@ -1095,29 +1095,38 @@ function buildTrends() {
 
 /* ------------------------------------------------------ trend card export */
 const SHARE_W = 1200, SHARE_PAD = 48, SHARE_CHART_W = SHARE_W - SHARE_PAD * 2;
-// Cards render at 2:1 — the ratio X shows in-feed without cropping. Height is
-// therefore fixed and the chart takes whatever the legend leaves, which is why
-// the box is measured before the snapshot: the chart is re-rendered at that
-// size rather than stretched into it, which would smear its axis text.
-const SHARE_H = SHARE_W / 2, SHARE_CHART_TOP = 132, SHARE_FOOT = 82;
-const LEG_FONT = '700 19px Syne, sans-serif';
-const LEG_ROW = 36, LEG_SWATCH = 18, LEG_GAP = 24;
+// Cards render at 2:1 — the ratio X shows in-feed without cropping. The legend
+// sits in a right-hand column rather than under the plot, which is what lets
+// the chart keep most of the height at this ratio. The box is measured before
+// the snapshot so the chart is re-rendered at the size it will occupy, rather
+// than stretched into it, which would smear its axis text.
+const SHARE_H = SHARE_W / 2, SHARE_CHART_TOP = 132;
+const LEG_COL = 220, LEG_GUTTER = 22, LEG_SWATCH = 16;
 
-function shareLegend(items, fmt) {
+function shareLayout(items, fmt) {
   const probe = document.createElement('canvas').getContext('2d');
-  probe.font = LEG_FONT;
-  let lx = SHARE_PAD, rows = 1;
-  const laid = items.map(it => {
-    const txt = it.val != null ? `${it.label} (${fmt(it.val)})` : it.label;
-    const w = probe.measureText(txt).width + LEG_SWATCH + 10;
-    if (lx + w > SHARE_W - SHARE_PAD) { lx = SHARE_PAD; rows++; }
-    const pos = { txt, x: lx, row: rows, color: it.color };
-    lx += w + LEG_GAP;
-    return pos;
-  });
-  const h = Math.round(SHARE_H - SHARE_CHART_TOP - 34 - rows * LEG_ROW - SHARE_FOOT);
-  return { laid, rows, w: SHARE_CHART_W, h };
+  const chart = {
+    x: SHARE_PAD,
+    y: SHARE_CHART_TOP,
+    w: SHARE_W - SHARE_PAD * 2 - LEG_COL - LEG_GUTTER,
+    h: Math.round(SHARE_H - 64 - 22 - SHARE_CHART_TOP),
+  };
+  // Shrink the legend rather than let a long label overrun the column.
+  const txts = items.map(it => it.val != null ? `${it.label} (${fmt(it.val)})` : it.label);
+  let size = 18;
+  for (const s of [18, 16, 14, 12]) {
+    probe.font = `700 ${s}px Syne, sans-serif`;
+    size = s;
+    if (Math.max(...txts.map(t => probe.measureText(t).width)) <= LEG_COL - LEG_SWATCH - 12) break;
+  }
+  const rowH = Math.min(30, Math.floor(chart.h / Math.max(items.length, 1)));
+  const x = SHARE_W - SHARE_PAD - LEG_COL;
+  const laid = items.map((it, i) => ({
+    txt: txts[i], color: it.color, x, y: chart.y + 16 + i * rowH,
+  }));
+  return { laid, chart, font: `700 ${size}px Syne, sans-serif` };
 }
+
 let _dfdvImg = null;
 function dfdvLogo() {
   _dfdvImg ??= new Promise(res => {
@@ -1128,14 +1137,12 @@ function dfdvLogo() {
   return _dfdvImg;
 }
 
-/* Shared renderer for branded share images: title, note, chart, legend,
-   DFDV mark top-right, State of Solana + CTA footer. */
+/* Shared renderer for branded share images: title, note, chart, side legend,
+   DFDV mark top-right, gradient CTA footer. */
 async function buildShareImage(src, title, note, items, fmt) {
   const logo = await dfdvLogo();
   const S = 2, W = SHARE_W, PAD = SHARE_PAD, H = SHARE_H;
-  const { laid, rows, w: chartW, h: chartH } = shareLegend(items, fmt);
-  const chartTop = SHARE_CHART_TOP;
-  const legendTop = chartTop + chartH + 34;
+  const { laid, chart, font } = shareLayout(items, fmt);
   const cv = document.createElement('canvas');
   cv.width = W * S; cv.height = H * S;
   const g = cv.getContext('2d');
@@ -1166,22 +1173,21 @@ async function buildShareImage(src, title, note, items, fmt) {
     g.drawImage(logo, W - PAD - lw, 42, lw, lh);
   }
 
-  g.drawImage(src, PAD, chartTop, chartW, chartH);
+  g.drawImage(src, chart.x, chart.y, chart.w, chart.h);
 
-  g.font = LEG_FONT;
+  g.font = font;
   for (const p of laid) {
-    const y = legendTop + (p.row - 1) * LEG_ROW;
     if (Array.isArray(p.color)) {
       // dual-color candle swatch: diagonal split, up-color over down-color
-      const s = LEG_SWATCH, sx = p.x, sy = y - 14;
-      g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + s, sy); g.lineTo(sx, sy + s); g.closePath();
+      const sz = LEG_SWATCH, sx = p.x, sy = p.y - 12;
+      g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + sz, sy); g.lineTo(sx, sy + sz); g.closePath();
       g.fillStyle = p.color[0]; g.fill();
-      g.beginPath(); g.moveTo(sx + s, sy); g.lineTo(sx + s, sy + s); g.lineTo(sx, sy + s); g.closePath();
+      g.beginPath(); g.moveTo(sx + sz, sy); g.lineTo(sx + sz, sy + sz); g.lineTo(sx, sy + sz); g.closePath();
       g.fillStyle = p.color[1]; g.fill();
     } else {
-      g.fillStyle = p.color; g.fillRect(p.x, y - 12, LEG_SWATCH, 7);
+      g.fillStyle = p.color; g.fillRect(p.x, p.y - 9, LEG_SWATCH, 6);
     }
-    g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + LEG_SWATCH + 10, y);
+    g.fillStyle = '#D3DBEA'; g.fillText(p.txt, p.x + LEG_SWATCH + 10, p.y);
   }
 
   // The domain is the whole point of sharing the card, so it gets the loudest
@@ -1190,12 +1196,12 @@ async function buildShareImage(src, title, note, items, fmt) {
   g.strokeStyle = 'rgba(143,165,212,0.15)';
   g.beginPath(); g.moveTo(PAD, fy); g.lineTo(W - PAD, fy); g.stroke();
   const cta = 'StateOfSOL.com';
-  g.font = '800 32px Syne, sans-serif';
+  g.font = '800 22px Syne, sans-serif';
   const cw = g.measureText(cta).width, cx = W - PAD - cw;
   const cg = g.createLinearGradient(cx, 0, cx + cw, 0);
   cg.addColorStop(0, '#F5A524'); cg.addColorStop(1, '#ED3D24');
   g.fillStyle = cg;
-  g.fillText(cta, cx, fy + 44);
+  g.fillText(cta, cx, fy + 38);
   return cv;
 }
 
@@ -1282,7 +1288,7 @@ async function buildTrendImage(key, title, fmt, el) {
   }
   const note = el.querySelector('.note').textContent.trim();
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
-  return buildShareImage(snapshotChart(chart, 22, 4, shareLegend(items, fmt)),
+  return buildShareImage(snapshotChart(chart, 22, 4, shareLayout(items, fmt).chart),
                          title, note, items, fmt);
 }
 
@@ -1311,7 +1317,7 @@ async function downloadPriceImage() {
     yOpt().ticks.callback = v => `${v >= 0 ? '+' : ''}${Math.round(v)}%`;
     let snap;
     try {
-      snap = snapshotChart(priceChart, 22, 4, shareLegend(items, pctSigned));
+      snap = snapshotChart(priceChart, 22, 4, shareLayout(items, pctSigned).chart);
     } finally {
       yOpt().position = savedPos;
       drawPrice();                     // puts the live view's ticks back too
@@ -1334,7 +1340,7 @@ async function downloadPriceImage() {
   }
   const title = state.rainbow ? "DFDV's Solana Rainbow Chart" : 'SOL Price History';
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
-  const cv = await buildShareImage(snapshotChart(priceChart, 22, 4, shareLegend(items, price)),
+  const cv = await buildShareImage(snapshotChart(priceChart, 22, 4, shareLayout(items, price).chart),
                                    title, note, items, price);
   if (cv) saveCanvas(cv, `state-of-solana-sol-price-${state.range}.png`);
 }
