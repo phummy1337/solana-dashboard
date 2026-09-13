@@ -1145,6 +1145,9 @@ function trendCutoff(range, key) {
 /* Which cards are on screen. Everything else stays one click away in the
    picker rather than being rendered sixteen-at-once into a wall nobody reads. */
 const TREND_DEFAULT = ['rev', 'app_revenue', 'ytd_transactions', 'ytd_dex_volume'];
+/* One order for the picker and the grid alike, so a card sits where its name
+   sits in the list rather than where it happens to be declared. */
+const TRENDS_AZ = [...TRENDS].sort((a, b) => a.title.localeCompare(b.title));
 const TREND_STORE = 'sos.trends';
 let trendPicked = null;
 
@@ -1170,7 +1173,7 @@ function renderTrendPicker() {
   if (!box) return;
   const picked = pickedTrends();
   box.textContent = '';
-  for (const t of TRENDS) {
+  for (const t of TRENDS_AZ) {
     if (!state.trendCompare?.[t.compare] && !state.trendSeries?.[t.key]) continue;
     const on = picked.includes(t.key);
     const b = document.createElement('button');
@@ -1197,7 +1200,7 @@ function buildTrends() {
   const picked = pickedTrends();
   // Render in the picker's order, not the click order, so the grid does not
   // reshuffle itself every time something is toggled.
-  for (const t of TRENDS) {
+  for (const t of TRENDS_AZ) {
     if (!picked.includes(t.key)) continue;
     const el = makeTrendCard(t);
     if (el) grid.appendChild(el);
