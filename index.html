@@ -222,6 +222,14 @@
   .trend-ctl { display: flex; flex-wrap: wrap; gap: 6px; }
   .trend-ctl .tgl { padding: 5px 11px; font-size: 12px; }
   .crow { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  /* Every trend card the same shape: the title owns its line and the controls
+     start the next one. Sharing a row only held while the titles were short —
+     "Real Economic Value (REV)" pushed its controls onto a second line and
+     indented them, so no two cards lined up. */
+  .tcard .crow { display: block; }
+  /* Fixed title height: the "?" badge is 2px taller than the text, which would
+     otherwise set the cards with a tooltip 2px lower than those without. */
+  .tcard .crow > h3 { min-height: 19px; margin-bottom: 8px; }
   .trend-ctl.small { gap: 3px; }
   .trend-ctl.small .tgl { padding: 2px 7px; font-size: 10px; border-radius: 9px; }
   .modegrp { display: inline-flex; gap: 8px; flex: none; }
@@ -1543,7 +1551,9 @@ function makeTrendCard(t) {
 
   trendCharts[t.key]?.destroy();
   const el = document.createElement('div');
-  el.className = 'panel';
+  // `tcard` carries the card's own layout rules, which have to survive the
+  // panel being moved out of #trendGrid and into the enlarge modal.
+  el.className = 'panel tcard';
   const noteTail = (range === '1d' ? ' · latest complete day' : '')
                  + (t.noteUnit || '')
                  + (period !== 'd' ? ' · ' + TREND_AGGS.find(a => a[0] === period)[1].toLowerCase()
