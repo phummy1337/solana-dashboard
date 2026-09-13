@@ -387,6 +387,33 @@
   .leg.lev-note { flex-basis: 100%; justify-content: center; margin-top: 2px;
                   color: var(--mute); }
   #trendGrid .leg { font-size: 11px; }
+  /* Sixteen cards at once was a wall. The picker lists everything available and
+     the grid renders only what is ticked. */
+  .trend-shell { display: grid; grid-template-columns: 224px 1fr; gap: 14px;
+                 padding: 14px 48px 0; align-items: start; }
+  .trend-shell #trendGrid { padding: 0; grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 1500px) { .trend-shell #trendGrid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 1100px) {
+    .trend-shell { grid-template-columns: 1fr; }
+    .trend-picker { position: static !important; }
+    .trend-shell #trendGrid { grid-template-columns: 1fr; }
+  }
+  .trend-picker { background: var(--panel-2); border: 1px solid var(--line);
+                  border-radius: 14px; padding: 11px; position: sticky; top: 14px; }
+  .tp-head { display: flex; align-items: center; justify-content: space-between;
+             font-size: 11px; font-weight: 700; letter-spacing: .09em;
+             text-transform: uppercase; color: var(--mute); padding: 2px 6px 9px; }
+  .tp-reset { background: none; border: none; cursor: pointer; color: var(--mute);
+              font: 700 10px Syne; letter-spacing: .07em; text-transform: uppercase; }
+  .tp-reset:hover { color: var(--orange); }
+  .tp-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+             background: none; border: none; cursor: pointer; padding: 7px 8px;
+             border-radius: 8px; color: var(--peri); font: 600 12.5px Syne; }
+  .tp-item:hover { background: rgba(143,165,212,0.08); color: var(--ink); }
+  .tp-item[aria-pressed="true"] { color: var(--ink); background: rgba(249,115,22,0.13); }
+  .tp-dot { width: 9px; height: 9px; border-radius: 3px; flex: none;
+            background: currentColor; opacity: 0.28; }
+  .tp-item[aria-pressed="true"] .tp-dot { opacity: 1; }
 
   footer { display: flex; flex-direction: column; gap: 7px;
            padding: 26px 48px 26px; border-top: 1px solid var(--line-2); margin-top: 26px; }
@@ -528,7 +555,13 @@
   <h2>Cross-Chain Trends</h2>
   <span class="rule"></span>
 </div>
-<section class="grid" id="trendGrid"></section>
+<div class="trend-shell">
+  <aside class="trend-picker">
+    <div class="tp-head">Charts <button class="tp-reset" id="trendReset" type="button">Reset</button></div>
+    <div id="trendPicker"></div>
+  </aside>
+  <section class="grid" id="trendGrid"></section>
+</div>
 
 <div id="fsBackdrop"></div>
 <div id="cardModal" role="dialog" aria-modal="true"><button class="tgl" id="cardModalClose">✕ Close</button><div id="cardModalBody"></div></div>
@@ -968,6 +1001,8 @@ const TRENDS = [
     tip: '<b>In simple terms:</b> every asset starts at 0% on the left edge of whatever window you pick, so the lines show percentage gain or loss from that same starting point — the only fair way to compare a $77,000 coin with a $0.72 one.<br><br><b>Why it matters:</b> it answers whether SOL is outperforming the majors and its direct L1/L2 competitors over your chosen horizon, rather than just moving with the whole market. Data covers the last year (CoinGecko free tier).' },
   { key: 'rev', compare: 'rev', title: 'Real Economic Value (REV)', color: '#14F195', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> the total amount users actually pay to use a chain each day — transaction fees plus tips to validators. It is the closest thing a blockchain has to revenue.<br><br><b>Why it matters:</b> supply, TVL and transaction counts can all be inflated cheaply; REV cannot, because someone has to part with real money. It is the cleanest read on genuine demand for blockspace.' },
+  { key: 'app_revenue', compare: 'app_revenue', title: 'App Revenue', color: '#F5A524', fmt: usd, agg: 'sum',
+    tip: '<b>In simple terms:</b> what users pay the applications running on a chain — DEX fees, lending spreads, launchpad cuts — as opposed to what they pay the chain itself.<br><br><b>Why it matters:</b> read it against Real Economic Value. REV is the toll the network collects; this is the business built on top of it. A chain can carry cheap blockspace and still host enormous app businesses, and the ratio between the two is a fair read on where the value actually accrues. Source: DefiLlama.' },
   { key: 'rev_share', compare: 'rev_share', title: 'Share of Cross-Chain REV', color: '#F97316', fmt: pct1, agg: 'mean',
     tip: '<b>In simple terms:</b> of every dollar users spent on blockspace across these ten chains that day, this is the slice each one captured.<br><br><b>Why it matters:</b> absolute REV rises and falls with the whole market, so share shows who is actually winning demand. A chain gaining share is taking real paying activity from the others.' },
   { key: 'active_addresses', compare: 'active_addresses', title: 'Active Addresses', color: '#38BDF8', fmt: compact, agg: 'mean',
@@ -1082,12 +1117,63 @@ function trendCutoff(range, key) {
   return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 }
 
+/* Which cards are on screen. Everything else stays one click away in the
+   picker rather than being rendered sixteen-at-once into a wall nobody reads. */
+const TREND_DEFAULT = ['rev', 'app_revenue', 'ytd_transactions', 'ytd_dex_volume'];
+const TREND_STORE = 'sos.trends';
+let trendPicked = null;
+
+function pickedTrends() {
+  if (!trendPicked) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(TREND_STORE) || 'null'); } catch { /* private mode */ }
+    const valid = Array.isArray(saved) ? saved.filter(k => TRENDS.some(t => t.key === k)) : [];
+    trendPicked = valid.length ? valid : [...TREND_DEFAULT];
+  }
+  return trendPicked;
+}
+
+function setPicked(keys) {
+  trendPicked = keys;
+  try { localStorage.setItem(TREND_STORE, JSON.stringify(keys)); } catch { /* private mode */ }
+  renderTrendPicker();
+  buildTrends();
+}
+
+function renderTrendPicker() {
+  const box = $('trendPicker');
+  if (!box) return;
+  const picked = pickedTrends();
+  box.textContent = '';
+  for (const t of TRENDS) {
+    if (!state.trendCompare?.[t.compare] && !state.trendSeries?.[t.key]) continue;
+    const on = picked.includes(t.key);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tp-item';
+    b.setAttribute('aria-pressed', String(on));
+    const dot = document.createElement('span');
+    dot.className = 'tp-dot';
+    dot.style.color = t.color;
+    b.append(dot, document.createTextNode(t.title));
+    b.addEventListener('click', () => {
+      const next = on ? picked.filter(k => k !== t.key) : [...picked, t.key];
+      if (next.length) setPicked(next);   // never leave the grid empty
+    });
+    box.appendChild(b);
+  }
+}
+
 function buildTrends() {
   const grid = $('trendGrid');
   Object.values(trendCharts).forEach(c => c.destroy());
   trendCharts = {};
   grid.innerHTML = '';
+  const picked = pickedTrends();
+  // Render in the picker's order, not the click order, so the grid does not
+  // reshuffle itself every time something is toggled.
   for (const t of TRENDS) {
+    if (!picked.includes(t.key)) continue;
     const el = makeTrendCard(t);
     if (el) grid.appendChild(el);
   }
@@ -1658,6 +1744,7 @@ async function loadData() {
     drawPrice();
     state.trendSeries = d.series || {};
     state.trendCompare = d.compare || {};
+    renderTrendPicker();
     buildTrends();
     renderYield(d.yield_products);
     renderNews(d.news);
@@ -2145,6 +2232,7 @@ function setScale(scale) {
   state.scale = scale || 'logarithmic';
   $('priceScale').value = state.scale;
 }
+$('trendReset').addEventListener('click', () => setPicked([...TREND_DEFAULT]));
 $('priceDl').addEventListener('click', downloadPriceImage);
 $('seasonDl').addEventListener('click', downloadSeasonImage);
 function setPricePopup(open) {

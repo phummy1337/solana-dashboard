@@ -539,6 +539,34 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         warn(f"compare tokenized equity chart: {e}")
 
+    # --------------------------------------------------- app revenue (DefiLlama)
+    # Revenue earned by the applications running on a chain, which is a
+    # different thing from the chain's own REV: REV is what users pay the
+    # network, this is what they pay the protocols on top of it. Blockworks
+    # carries the metric for only a couple of chains, DefiLlama for all of them.
+    # Requests are spaced — firing all eleven at once gets some back empty.
+    try:
+        out = {}
+        for chain, slug in LLAMA_SLUGS.items():
+            try:
+                j = get("https://api.llama.fi/overview/fees/" + urllib.parse.quote(slug)
+                        + "?excludeTotalDataChart=false"
+                        + "&excludeTotalDataChartBreakdown=true&dataType=dailyRevenue")
+                pts = [{"d": datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat(),
+                        "v": v} for t, v in (j.get("totalDataChart") or []) if v]
+                pts = [p for p in pts if since <= p["d"] < today_utc]
+                if pts:
+                    out[chain] = pts
+            except Exception as e:  # noqa: BLE001 - one chain missing is survivable
+                warn(f"app revenue {chain}: {e}")
+            time.sleep(1.5)
+        if out:
+            compare["app_revenue"] = out
+            print("  compare app revenue: "
+                  + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+    except Exception as e:  # noqa: BLE001
+        warn(f"app revenue: {e}")
+
     try:
         out = {}
         for chain, slug in LLAMA_SLUGS.items():
@@ -1016,6 +1044,7 @@ def main() -> int:
     PLACES = {
         "rev": 0, "dex_volume": 0, "defi_tvl": 0, "stablecoin_supply": 0,
         "tokenized_equity_volume": 0, "transactions": 0, "active_addresses": 0,
+        "app_revenue": 0,
         "rev_share": 2, "tx_per_address": 2, "fsr": 2,
         # fee_vol is a dollar amount on the same scale as fee_median — sub-cent
         # on every chain but Ethereum — so two decimals flattened six of the
