@@ -210,8 +210,10 @@
   .spark { position: relative; height: 96px; margin-top: 12px; }
   .spark canvas { width: 100% !important; height: 100% !important; }
   /* trend cards get real chart height */
-  #trendGrid .spark { height: 190px; }
-  #trendGrid .spark.tall { height: 300px; }
+  /* Taller than before: the legend no longer needs rows underneath, so the
+     plot takes part of what it gave back and the card is still shorter. */
+  #trendGrid .spark { height: 210px; }
+  #trendGrid .spark.tall { height: 336px; }
 
   /* Activity Trends: fixed two-across so the comparison charts get room. */
   #trendGrid { grid-template-columns: repeat(3, 1fr); }
@@ -387,6 +389,29 @@
   .leg.lev-note { flex-basis: 100%; justify-content: center; margin-top: 2px;
                   color: var(--mute); }
   #trendGrid .leg { font-size: 11px; }
+  /* Legend beside the plot rather than under it: the chart keeps the width it
+     had and gets back the rows the legend used to occupy below. The column
+     stretches to the plot's height and scrolls past that, so an eleven-chain
+     card is no taller than a two-chain one. */
+  #trendGrid .chartrow { display: flex; gap: 10px; margin-top: 12px; align-items: stretch; }
+  #trendGrid .chartrow .spark { flex: 1; min-width: 0; margin-top: 0; }
+  #trendGrid .chartrow .legend { flex: none; width: clamp(104px, 28%, 138px); margin-top: 0;
+                                 gap: 6px; flex-direction: column; flex-wrap: nowrap;
+                                 align-items: flex-start; overflow-y: auto;
+                                 scrollbar-width: thin; padding-right: 4px; }
+  #trendGrid .chartrow .legend::-webkit-scrollbar { width: 6px; }
+  #trendGrid .chartrow .legend::-webkit-scrollbar-thumb {
+    background: rgba(143,165,212,0.3); border-radius: 99px; }
+  #trendGrid .chartrow .leg { font-size: 10.5px; width: 100%; flex-wrap: wrap; gap: 4px 6px; }
+  #trendGrid .chartrow .leg .v { margin-left: 0; }
+  /* On a narrow card a side column would take more width than the plot, so
+     below this the legend goes back underneath and lays out in rows. */
+  @media (max-width: 760px) {
+    #trendGrid .chartrow { display: block; }
+    #trendGrid .chartrow .legend { width: auto; max-height: none; overflow: visible;
+                                   flex-direction: row; flex-wrap: wrap; margin-top: 10px; }
+    #trendGrid .chartrow .leg { width: auto; font-size: 11px; }
+  }
   /* Sixteen cards at once was a wall. The picker lists everything available and
      the grid renders only what is ticked. */
   .trend-shell { display: grid; grid-template-columns: 224px 1fr; gap: 14px;
@@ -1506,8 +1531,10 @@ function makeTrendCard(t) {
     ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
         `<button class="tgl" data-cvariant="${v.id}" aria-pressed="${v.id === variant.id}">${v.label}</button>`).join('')}</div>` : ''}
     <div class="note" data-tail="${noteTail}">Latest · ${fmtDate(last.d)}${noteTail}</div>
-    <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
-    ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}
+    <div class="chartrow">
+      <div class="spark${cmp ? ' tall' : ''}"><canvas role="img" aria-label="${t.title}"></canvas></div>
+      ${cmp && range !== '1d' ? '<div class="legend"></div>' : ''}
+    </div>
     <div class="dlrow"><button class="tgl dlbtn" data-cdl title="Download this chart as PNG">⤓ PNG</button></div>`;
   el.querySelector('[data-crange-sel]').addEventListener('change', e => {
     state.trendRanges[t.key] = e.target.value;
