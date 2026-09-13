@@ -758,17 +758,30 @@ const RAINBOW = ['#F2C9DE','#E9469A','#EF5B7B','#F2683C','#F97316','#F5A524',
 const nf = (n, d = 0) => n == null || !isFinite(n) ? '—'
   : n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 
-function compact(n, prefix = '') {
+function compact(n, prefix = '', places = null) {
   if (n == null || !isFinite(n)) return '—';
   if (n === 0) return prefix + '0';           // keeps axis baselines from reading "0.0000"
   const a = Math.abs(n);
   // 0.9995 claims a value that would round up into the unit: $999,585 belongs
   // in "1.00M", not the "1000K" a plain `a >= v` produces.
   for (const [v, s] of [[1e12,'T'],[1e9,'B'],[1e6,'M'],[1e3,'K']])
-    if (a >= v * 0.9995) return prefix + (n / v).toFixed(a / v >= 100 ? 0 : a / v >= 10 ? 1 : 2) + s;
-  return prefix + n.toFixed(a < 1 ? 4 : 2);
+    if (a >= v * 0.9995)
+      return prefix + (n / v).toFixed(places ?? (a / v >= 100 ? 0 : a / v >= 10 ? 1 : 2)) + s;
+  return prefix + n.toFixed(places ?? (a < 1 ? 4 : 2));
 }
 const usd = n => compact(n, '$');
+/* Axis ticks drop the decimal — "$10M" reads at a glance where "$10.0M" makes
+   you parse it. Only the compact formatters get a tick variant: a median fee of
+   $0.00003 and a +1.4% return have nothing to round away. */
+const usdAxis = n => compact(n, '$', 0);
+const numAxis = n => compact(n, '', 0);
+/* Sub-cent fees: fixed decimals in the card, trimmed on the axis, where the
+   rounded-out top would otherwise read "$1.000". */
+const feeUsd = v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5));
+const feeAxis = v => '$' + String(v.toFixed(v >= 0.01 ? 3 : 7))
+  .replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+const axisFmt = fmt =>
+  fmt === usd ? usdAxis : fmt === compact ? numAxis : fmt === feeUsd ? feeAxis : fmt;
 const price = n => n == null || !isFinite(n) ? '—'
   : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 4 : 2 });
 const signed = (n, s = '%') => n == null || !isFinite(n) ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + s;
@@ -872,7 +885,19 @@ function zoneFor(dateStr, close) {
 /* -------------------------------------------------------------------- charts */
 Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 Chart.defaults.color = '#6B7FAB';
-const gridCfg = { color: 'rgba(143,165,212,0.07)', drawTicks: false };
+const gridCfg = { color: 'rgba(143,165,212,0.16)', drawTicks: false };
+/* A log axis stops at the data, so a $68M bar ran past a $10M top gridline with
+   nothing to measure it against. Round the top out to the next round number so
+   the highest line always clears the tallest bar, and give the bottom the same
+   treatment so the plot sits between two labelled lines. Whole decades, not a
+   tighter 1/2/5 ladder: Chart.js labels decades and autoskips anything closer,
+   so a top of $200M drew no line at all — the bar cleared the last label just
+   as before. */
+function logDecades(axis) {
+  if (axis.type !== 'logarithmic' || !(axis.max > 0) || !(axis.min > 0)) return;
+  axis.max = 10 ** Math.ceil(Math.log10(axis.max) - 1e-9);
+  axis.min = 10 ** Math.floor(Math.log10(axis.min) + 1e-9);
+}
 const tooltipCfg = {
   backgroundColor: 'rgba(8,17,38,0.96)', borderColor: 'rgba(143,165,212,0.25)', borderWidth: 1,
   titleColor: '#F1F5FB', bodyColor: '#8FA5D4', padding: 12, cornerRadius: 10, displayColors: false,
@@ -1069,10 +1094,10 @@ const TRENDS = [
   { key: 'fsr_card', compare: 'fsr', title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact, agg: 'mean',
     tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are.<br><br><b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD.<br><br><b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.' },
   { key: 'fee_median_card', compare: 'fee_median', title: 'Median Transaction Fee', color: '#EAB308',
-    fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)), agg: 'mean',
+    fmt: feeUsd, agg: 'mean',
     tip: '<b>In simple terms:</b> what the middle transaction costs that day — half cost less, half cost more. The median is used rather than the average so a handful of enormous transactions cannot skew it.<br><br><b>Why it matters:</b> this is the number a normal user actually feels. Cheap, predictable fees are what let payments, gaming and high-frequency apps work at all.' },
   { key: 'fee_vol_card', compare: 'fee_vol', title: 'Median Fee Volatility', color: '#EF4444',
-    fmt: v => '$' + (v >= 0.01 ? v.toFixed(3) : v.toFixed(5)), agg: 'mean',
+    fmt: feeUsd, agg: 'mean',
     tip: '<b>In simple terms:</b> how much the median fee swings around — the 30-day rolling standard deviation of a chain&rsquo;s daily median fee, in dollars.<br><br><b>Why it matters:</b> a low fee is only useful if it stays low. High volatility means costs spike without warning, which is what makes budgeting for on-chain activity difficult.' },
 ];
 const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y', 'custom'];
@@ -1167,6 +1192,7 @@ function sparkOptions(t, unit, logScale) {
            border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 34, font: { size: 10 } } },
       y: { type: logScale ? 'logarithmic' : 'linear',
            grid: gridCfg, border: { display: false }, beginAtZero: !logScale,
+           afterDataLimits: logDecades,
            // Log axes over a narrow range produce ugly data-edge ticks
            // (167M, 169M, ...); snap to round numbers instead.
            afterBuildTicks(axis) {
@@ -1180,12 +1206,14 @@ function sparkOptions(t, unit, logScale) {
                ticks.push({ value: v });
              if (ticks.length >= 2) axis.ticks = ticks;
            },
-           ticks: { maxTicksLimit: 6, font: { size: 10 }, callback: v => t.fmt(v) } },
+           ticks: { maxTicksLimit: 6, font: { size: 10 }, callback: v => axisFmt(t.fmt)(v) } },
     },
     plugins: { legend: { display: false },
-               // Colored swatches per row so multi-chain tooltips are scannable.
+               // Colored swatches per row so multi-chain tooltips are scannable,
+               // ranked like the legend beside them rather than in series order.
                tooltip: { ...tooltipCfg, displayColors: true, usePointStyle: true,
                  boxWidth: 7, boxHeight: 7, boxPadding: 3,
+                 itemSort: (a, b) => b.parsed.y - a.parsed.y,
                  callbacks: {
                    label: c => ' ' + (c.dataset.label === t.title ? '' : c.dataset.label + '  ') + t.fmt(c.parsed.y),
                    labelPointStyle: () => ({ pointStyle: 'circle', rotation: 0 }),
@@ -1681,7 +1709,8 @@ function makeTrendCard(t) {
                ticks: { font: { size: 11 }, maxRotation: 60, autoSkip: false } },
           y: { type: logScale ? 'logarithmic' : 'linear', beginAtZero: !logScale,
                grid: gridCfg, border: { display: false },
-               ticks: { maxTicksLimit: 4, font: { size: 10 }, callback: v => t.fmt(v) } },
+               afterDataLimits: logDecades,
+               ticks: { maxTicksLimit: 4, font: { size: 10 }, callback: v => axisFmt(t.fmt)(v) } },
         },
         plugins: { legend: { display: false },
                    tooltip: { ...tooltipCfg, callbacks: { label: c => t.fmt(c.parsed.y) } } },
@@ -1857,11 +1886,12 @@ function makeTrendCard(t) {
           x: { grid: { display: false }, border: { display: false },
                ticks: { font: { size: 11 }, maxRotation: 0 } },
           y: { grid: gridCfg, border: { display: false },
-               ticks: { maxTicksLimit: 6, font: { size: 10 }, callback: v => t.fmt(v) } },
+               ticks: { maxTicksLimit: 6, font: { size: 10 }, callback: v => axisFmt(t.fmt)(v) } },
         },
         plugins: { legend: { display: false },
                    tooltip: { ...tooltipCfg, displayColors: true, usePointStyle: true,
                      boxWidth: 7, boxHeight: 7, boxPadding: 3,
+                     itemSort: (a, b) => b.parsed.y - a.parsed.y,
                      callbacks: {
                        label: c => ` ${c.dataset.label}  ${t.fmt(c.parsed.y)}`,
                        title: c => {
