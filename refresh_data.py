@@ -837,6 +837,14 @@ def main() -> int:
                           - timedelta(days=1)).isoformat(),
                     "v": v} for t, v in (j.get("prices") or [])]
             pts = [p for p in pts if p["d"] < today_utc]
+            # CoinGecko appends a live "now" sample after the 00:00 snapshots, so
+            # the last date arrives twice — once as yesterday's close, once as
+            # today's intraday price wearing yesterday's date. Keep the close;
+            # the intraday story belongs to the price chart, which has a real
+            # timestamp for it. A repeated date also miscounts the days behind
+            # a week-to-date or month-to-date figure.
+            seen: set = set()
+            pts = [p for p in pts if not (p["d"] in seen or seen.add(p["d"]))]
             if pts:
                 perf[label] = pts
         except Exception as e:  # noqa: BLE001

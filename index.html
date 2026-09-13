@@ -404,6 +404,10 @@
     background: rgba(143,165,212,0.3); border-radius: 99px; }
   #trendGrid .chartrow .leg { font-size: 10.5px; width: 100%; flex-wrap: wrap; gap: 4px 6px; }
   #trendGrid .chartrow .leg .v { margin-left: 0; }
+  /* The legend's numbers are the last plotted point; when that point is a
+     period still running, say so once at the top instead of on every row. */
+  .legend .legcap { font-size: 9px; font-weight: 700; letter-spacing: 0.09em;
+                    color: var(--mute); text-transform: uppercase; width: 100%; }
   /* On a narrow card a side column would take more width than the plot, so
      below this the legend goes back underneath and lays out in rows. */
   @media (max-width: 760px) {
@@ -1062,28 +1066,57 @@ const TREND_AGGS = [['d', 'Daily'], ['w', 'Weekly'], ['m', 'Monthly'], ['q', 'Qu
 /* Re-bucket a daily series. Flow metrics sum per bucket, level metrics keep
    the period-end value, fee metrics average. Bucket is stamped with its last
    date so the time axis stays honest about partial current periods. */
+const PTD_TAG = { w: 'WTD', m: 'MTD', q: 'QTD', y: 'YTD' };
+/* Days in the whole period that `dateStr` falls in — the denominator behind
+   "13 of 30 days". */
+function periodSpan(dateStr, period) {
+  const dt = new Date(dateStr + 'T00:00:00Z');
+  const y = dt.getUTCFullYear(), m = dt.getUTCMonth();
+  const days = (a, b) => (Date.UTC(...b) - Date.UTC(...a)) / 86400000;
+  if (period === 'w') return 7;
+  if (period === 'm') return new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  if (period === 'q') { const q0 = Math.floor(m / 3) * 3; return days([y, q0, 1], [y, q0 + 3, 1]); }
+  if (period === 'y') return days([y, 0, 1], [y + 1, 0, 1]);
+  return 1;
+}
+function aggKey(dateStr, period) {
+  if (period === 'w') {
+    const dt = new Date(dateStr + 'T00:00:00Z');
+    dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7));
+    return dt.toISOString().slice(0, 10);
+  }
+  if (period === 'm') return dateStr.slice(0, 7);
+  if (period === 'q') return dateStr.slice(0, 4) + '-Q' + (Math.floor((+dateStr.slice(5, 7) - 1) / 3) + 1);
+  return dateStr.slice(0, 4);
+}
 function aggregateSeries(pts, period, mode) {
   if (period === 'd') return pts;
   const buckets = new Map();
   for (const p of pts) {
-    let key;
-    if (period === 'w') {
-      const dt = new Date(p.d + 'T00:00:00Z');
-      dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7));
-      key = dt.toISOString().slice(0, 10);
-    } else if (period === 'm') key = p.d.slice(0, 7);
-    else if (period === 'q') key = p.d.slice(0, 4) + '-Q' + (Math.floor((+p.d.slice(5, 7) - 1) / 3) + 1);
-    else key = p.d.slice(0, 4);
+    const key = aggKey(p.d, period);
     let b = buckets.get(key);
-    if (!b) buckets.set(key, b = { d: p.d, sum: 0, n: 0, last: p.v });
+    if (!b) buckets.set(key, b = { key, d: null, sum: 0, n: 0, days: 0, last: p.v });
+    // Distinct dates, not rows: the price feed repeats its last date (yesterday's
+    // close and today's quote), which would report a 6-day week as 7 of 7.
+    if (p.d !== b.d) b.days++;
     b.sum += p.v; b.n++; b.last = p.v; b.d = p.d;
   }
-  let out = [...buckets.values()].map(b =>
-    ({ d: b.d, v: mode === 'sum' ? b.sum : mode === 'mean' ? b.sum / b.n : b.last }));
+  const out = [...buckets.values()].map(b =>
+    ({ d: b.d, v: mode === 'sum' ? b.sum : mode === 'mean' ? b.sum / b.n : b.last, n: b.days, key: b.key }));
   // A bucket still in progress is not comparable to the completed ones — a
-  // month one day old reads as a collapse on a totals chart and as a bogus
-  // "monthly return" on a performance chart. Drop the tail unless it closed.
-  if (out.length && !periodClosed(out[out.length - 1].d, period)) out = out.slice(0, -1);
+  // month one day old is a tenth of a month, not a collapse. It is still the
+  // number people come for, so keep it and tag it WTD/MTD/QTD/YTD; the chart
+  // draws it dashed and the note says how much of the period it covers.
+  // Only the period containing today qualifies: a short trailing bucket on a
+  // series that stopped reporting months ago is stale data, not a running
+  // period, and it still gets dropped.
+  const tail = out[out.length - 1];
+  const nowKey = aggKey(new Date().toISOString().slice(0, 10), period);
+  if (tail && !periodClosed(tail.d, period)) {
+    if (tail.key !== nowKey) return out.slice(0, -1);
+    tail.ptd = PTD_TAG[period];
+    tail.of = periodSpan(tail.d, period);
+  }
   return out;
 }
 
@@ -1130,6 +1163,9 @@ function sparkOptions(t, unit, logScale) {
                  callbacks: {
                    label: c => ' ' + (c.dataset.label === t.title ? '' : c.dataset.label + '  ') + t.fmt(c.parsed.y),
                    labelPointStyle: () => ({ pointStyle: 'circle', rotation: 0 }),
+                   // Name the running period rather than letting its short bar
+                   // pass for a finished one.
+                   afterTitle: c => c[0]?.raw?.ptd ? `${c[0].raw.ptd} · ${c[0].raw.n} of ${c[0].raw.of} days` : '',
                  } } },
   };
 }
@@ -1617,7 +1653,10 @@ function makeTrendCard(t) {
 
     const prep = pts => {
       let out = aggregateSeries(pts, period, aggMode);
-      if (t.perSecond) out = out.map(p => ({ d: p.d, v: p.v / 86400 }));
+      if (t.perSecond) out = out.map(p => ({ ...p, v: p.v / 86400 }));
+      // A rolling mean that reaches back over closed periods is no longer a
+      // period-to-date figure, so the running bucket has nothing to say here.
+      if (smooth && period !== 'd' && out[out.length - 1]?.ptd) out = out.slice(0, -1);
       if (smooth) out = ma7(out);
       if (t.rebase && period !== 'd') {
         // Coarser than daily means the user asked for period returns: each
@@ -1626,7 +1665,7 @@ function makeTrendCard(t) {
         // period still measures against the period that preceded it.
         out = out.map((p, i) => {
           const base = i ? out[i - 1].v : null;
-          return { d: p.d, v: base ? (p.v / base - 1) * 100 : 0 };
+          return { ...p, v: base ? (p.v / base - 1) * 100 : 0 };
         }).slice(1);
         return clip(out);
       }
@@ -1635,22 +1674,31 @@ function makeTrendCard(t) {
       // prices spanning $0.72 to $77,000 have nothing else in common.
       if (t.rebase && out.length) {
         const base = out[0].v;
-        out = base ? out.map(p => ({ d: p.d, v: (p.v / base - 1) * 100 })) : out;
+        out = base ? out.map(p => ({ ...p, v: (p.v / base - 1) * 100 })) : out;
       }
       return out;
     };
     const hiddenSet = state.trendHidden[orig.key] || new Set();
     let datasets;
+    // The running period is drawn dashed with its final point marked, so it
+    // reads as "so far" instead of as a real drop off a cliff.
+    const ptdLine = data => ({
+      pointRadius: data.map(p => p.ptd ? 2.6 : 0),
+      segment: { borderDash: s => data[s.p1DataIndex]?.ptd ? [4, 3] : undefined },
+    });
     if (cmp) {
-      datasets = seriesList.filter(c => cmp[c.key]).map(c => ({
-        label: c.name,
+      datasets = seriesList.filter(c => cmp[c.key]).map(c => {
         // Dropping non-positives keeps a log axis valid, but rebased series
         // legitimately sit at or below zero — never filter those.
-        data: prep(cmp[c.key]).filter(p => t.rebase || p.v > 0).map(p => ({ x: p.d, y: p.v })),
-        borderColor: c.color, borderWidth: c.width, order: c.key === 'solana' ? 10 : 1,
-        pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: false,
-        hidden: hiddenSet.has(c.key),
-      })).filter(d => d.data.length);
+        const data = prep(cmp[c.key]).filter(p => t.rebase || p.v > 0)
+          .map(p => ({ x: p.d, y: p.v, k: p.key, ptd: p.ptd, n: p.n, of: p.of }));
+        return {
+          label: c.name, data, ...ptdLine(data),
+          borderColor: c.color, borderWidth: c.width, order: c.key === 'solana' ? 10 : 1,
+          pointBackgroundColor: c.color, pointHoverRadius: 3, tension: 0.25, fill: false,
+          hidden: hiddenSet.has(c.key),
+        };
+      }).filter(d => d.data.length);
       // Clickable chips: toggle a chain's line on/off (dimmed when off).
       const lastOf = name => {
         const ds = datasets.find(d => d.label === name);
@@ -1661,7 +1709,10 @@ function makeTrendCard(t) {
       const ranked = seriesList.filter(c => cmp[c.key])
         .map(c => ({ c, v: lastOf(c.name) }))
         .sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity));
-      el.querySelector('.legend').innerHTML = ranked.map(({ c, v }) =>
+      const legTag = datasets.flatMap(d => d.data).find(p => p.ptd)?.ptd;
+      el.querySelector('.legend').innerHTML =
+        (legTag ? `<div class="legcap">${legTag} so far</div>` : '') +
+        ranked.map(({ c, v }) =>
         `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
            <span class="sw" style="background:${c.color}"></span>${c.name}
            <span class="v num">${v != null ? t.fmt(v) : '—'}</span></button>`).join('');
@@ -1672,9 +1723,10 @@ function makeTrendCard(t) {
         if (fresh) el.replaceWith(fresh);
       }));
     } else {
+      const data = prep(solPts).map(p => ({ x: p.d, y: p.v, ptd: p.ptd, n: p.n, of: p.of }));
       datasets = [{
-        label: t.title, data: prep(solPts).map(p => ({ x: p.d, y: p.v })),
-        borderColor: t.color, borderWidth: 1.6, pointRadius: 0, pointHoverRadius: 3, tension: 0.25, fill: true,
+        label: t.title, data, ...ptdLine(data), pointBackgroundColor: t.color,
+        borderColor: t.color, borderWidth: 1.6, pointHoverRadius: 3, tension: 0.25, fill: true,
         backgroundColor: ctx => {
           const { chart } = ctx; if (!chart.chartArea) return 'transparent';
           const g = chart.ctx.createLinearGradient(0, chart.chartArea.top, 0, chart.chartArea.bottom);
@@ -1686,6 +1738,11 @@ function makeTrendCard(t) {
 
   // Restate the date as the last point actually drawn — trimming partial
   // periods can pull it back from the raw series' tail.
+  // The running period carries its own caveat: say which days it covers, using
+  // the chain that has reported the most of them.
+  const ptdPt = datasets.flatMap(ds => ds.data).filter(p => p.ptd)
+    .sort((a, b) => (b.n || 0) - (a.n || 0))[0];
+  const ptdNote = ptdPt ? ` · ${ptdPt.ptd} (${ptdPt.n} of ${ptdPt.of} days)` : '';
   // Per-period returns are discrete quantities, so draw them as grouped bars
   // rather than a line through a handful of points (a single visible period
   // left a line chart with nothing to render at all).
@@ -1698,20 +1755,36 @@ function makeTrendCard(t) {
       if (period === 'w') return `${mo} ${dt.getUTCDate()}`;
       return `${mo} ${dt.getUTCFullYear()}`;
     };
-    const labels = [...new Set(datasets.flatMap(ds => ds.data.map(p => p.x)))].sort();
+    // One column per period, keyed by the bucket rather than by its last date:
+    // in a running period the assets stop on different days, and keying by date
+    // splits one month into two columns both labelled "Sep 2026".
+    const labels = [...new Set(datasets.flatMap(ds => ds.data.map(p => p.k)))].sort();
+    // Latest date and running-period tag per column — the bar gets a hollow,
+    // dashed treatment and the axis tick names the period-to-date outright.
+    const meta = new Map(labels.map(l => [l, {}]));
+    for (const ds of datasets) for (const p of ds.data) {
+      const m = meta.get(p.k);
+      if (!m.x || p.x > m.x) m.x = p.x;
+      if (p.ptd) m.ptd = p.ptd;
+    }
     const barSets = datasets.map(ds => {
-      const by = Object.fromEntries(ds.data.map(p => [p.x, p.y]));
+      const by = Object.fromEntries(ds.data.map(p => [p.k, p.y]));
       return { label: ds.label, data: labels.map(l => by[l] ?? null),
-               backgroundColor: ds.borderColor, borderColor: ds.borderColor,
-               borderWidth: 0, borderRadius: 3, hidden: ds.hidden };
+               backgroundColor: labels.map(l => ds.borderColor + (meta.get(l).ptd ? '4D' : '')),
+               borderColor: ds.borderColor,
+               borderWidth: labels.map(l => meta.get(l).ptd ? 1.4 : 0),
+               borderDash: [3, 2], borderSkipped: false,
+               borderRadius: 3, hidden: ds.hidden };
     });
     const noteEl = el.querySelector('.note');
     if (labels.length)
-      noteEl.textContent = `Latest · ${fmtDate(labels[labels.length - 1])}` +
-                           (noteEl.dataset.tail || '');
+      noteEl.textContent = `Latest · ${fmtDate(meta.get(labels[labels.length - 1]).x)}` +
+                           (noteEl.dataset.tail || '') + ptdNote;
     trendCharts[t.key] = new Chart(canvas, {
       type: 'bar',
-      data: { labels: labels.map(periodLabel), datasets: barSets },
+      data: { labels: labels.map(l => meta.get(l).ptd
+                ? [periodLabel(meta.get(l).x), meta.get(l).ptd] : periodLabel(meta.get(l).x)),
+              datasets: barSets },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         interaction: { mode: 'index', intersect: false },
@@ -1724,7 +1797,13 @@ function makeTrendCard(t) {
         plugins: { legend: { display: false },
                    tooltip: { ...tooltipCfg, displayColors: true, usePointStyle: true,
                      boxWidth: 7, boxHeight: 7, boxPadding: 3,
-                     callbacks: { label: c => ` ${c.dataset.label}  ${t.fmt(c.parsed.y)}` } } },
+                     callbacks: {
+                       label: c => ` ${c.dataset.label}  ${t.fmt(c.parsed.y)}`,
+                       title: c => {
+                         const m = meta.get(labels[c[0].dataIndex]);
+                         return periodLabel(m.x) + (m.ptd ? ` · ${m.ptd} so far` : '');
+                       },
+                     } } },
       },
     });
     return el;
@@ -1734,7 +1813,7 @@ function makeTrendCard(t) {
   if (plotted.length) {
     const noteEl = el.querySelector('.note');
     noteEl.textContent = `Latest · ${fmtDate(plotted[plotted.length - 1])}` +
-                         (noteEl.dataset.tail || '');
+                         (noteEl.dataset.tail || '') + ptdNote;
   }
   trendCharts[t.key] = new Chart(canvas, {
     type: 'line', data: { datasets }, options: sparkOptions(t, unit, logScale),
