@@ -84,6 +84,23 @@ def get(url: str, headers: dict | None = None, tries: int = 3) -> dict | list:
         try:
             with urllib.request.urlopen(req, timeout=90, context=_SSL_CTX) as r:
                 return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            # The body says which limit was hit and for how long; without it a
+            # rate-limited run reports a bare "429" and nothing to act on.
+            try:
+                detail = e.read(400).decode(errors="replace").strip()
+            except Exception:  # noqa: BLE001
+                detail = ""
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            last = RuntimeError(f"{e}" + (f" — {detail}" if detail else "")
+                                + (f" (Retry-After {retry_after})" if retry_after else ""))
+            if attempt < tries - 1:
+                # A 429 is a window, not a blip: honour Retry-After when it is
+                # short enough to be worth waiting out.
+                wait = 2 * (attempt + 1)
+                if e.code == 429 and (retry_after or "").isdigit():
+                    wait = min(int(retry_after), 60)
+                time.sleep(wait)
         except Exception as e:  # noqa: BLE001 - retry any transport/parse failure
             last = e
             if attempt < tries - 1:
@@ -150,8 +167,29 @@ def at_or_before(series: dict[str, float], target: date, window: int = 10) -> fl
     return None
 
 
+def _last_date(val) -> str | None:
+    """Newest date in a series, or in the newest chain of a compare block."""
+    if isinstance(val, list):
+        return val[-1]["d"] if val and isinstance(val[-1], dict) and "d" in val[-1] else None
+    if isinstance(val, dict):
+        ds = [v[-1]["d"] for v in val.values()
+              if isinstance(v, list) and v and isinstance(v[-1], dict) and "d" in v[-1]]
+        return max(ds) if ds else None
+    return None
+
+
 def main() -> int:
     print("Refreshing Solana dashboard data...")
+    # The last good file, when there is one. A rate-limited upstream still lets
+    # this script finish and write a valid file — just one with whole cards
+    # missing — so anything a run fails to fetch is carried over from here
+    # rather than published as an absence. (Blockworks 429s every endpoint once
+    # its quota is spent, which blanked nine of the fifteen cards on 2026-09-14.)
+    prev_all: dict = {}
+    try:
+        prev_all = json.loads(OUT.read_text())
+    except Exception:  # noqa: BLE001 - first run or unreadable
+        pass
     data: dict = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "year": YEAR,
@@ -419,11 +457,7 @@ def main() -> int:
     # normally has data (seen on stablecoin supply for ethereum/polygon).
     # Carry the previous refresh's series forward so a card doesn't silently
     # lose a chain — but only if it is still recent, and always warn.
-    prev_compare: dict = {}
-    try:
-        prev_compare = json.loads(OUT.read_text()).get("compare") or {}
-    except Exception:  # noqa: BLE001 - first run or unreadable
-        pass
+    prev_compare: dict = prev_all.get("compare") or {}
 
     def compare_metric(slug: str, key: str, chains: list[str]) -> None:
         try:
@@ -1029,6 +1063,22 @@ def main() -> int:
         warn(f"monthly seasonality: {e}")
 
     data["compare"] = compare
+
+    # ------------------------------------------------- keep the last good data
+    # Only dated series are carried: every card prints the date of its own last
+    # point, so a stale curve reads as stale. Point-in-time stats carry no date
+    # and would simply look current, so those stay blank when a fetch fails.
+    carry_cut = (date.today() - timedelta(days=10)).isoformat()
+    for kind, fresh in (("compare", compare), ("series", data["series"])):
+        for key, val in (prev_all.get(kind) or {}).items():
+            if fresh.get(key):
+                continue
+            was = _last_date(val)
+            if was and was >= carry_cut:
+                fresh[key] = val
+                warn(f"{kind}.{key}: nothing fetched this run — kept the previous "
+                     f"series (through {was})")
+
     data["daily"] = daily
     data["warnings"] = warnings
 

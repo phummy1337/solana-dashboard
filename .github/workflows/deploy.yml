@@ -47,6 +47,16 @@ jobs:
           EVENT: ${{ github.event_name }}
           WANT_REFRESH: ${{ github.event.inputs.refresh }}
         run: |
+          # The live file is fetched on every run, not just the ones that reuse
+          # it: a refresh carries its series forward for anything the upstream
+          # fails to return, and the publish check below compares against it.
+          if curl -fsS --max-time 120 -o prev.json https://stateofsol.com/data.json \
+             && python3 -c "import json,sys; sys.exit(0 if json.load(open('prev.json')).get('stats',{}).get('price') else 1)"; then
+            echo "Fetched the live data.json ($(wc -c < prev.json) bytes)"
+          else
+            echo "No usable live data.json"
+            rm -f prev.json
+          fi
           # A push is normally a content change, not a data change. Reuse what
           # is already live rather than spending fifteen minutes and a CoinGecko
           # rate limit rebuilding an identical file. Anything that cannot be
@@ -54,23 +64,24 @@ jobs:
           # without data.
           reuse=false
           if [ "$EVENT" = "push" ] || { [ "$EVENT" = "workflow_dispatch" ] && [ "$WANT_REFRESH" = "false" ]; }; then
-            if curl -fsS --max-time 120 -o data.json https://stateofsol.com/data.json \
-               && python3 -c "import json,sys; sys.exit(0 if json.load(open('data.json')).get('stats',{}).get('price') else 1)"; then
+            if [ -f prev.json ]; then
+              cp prev.json data.json
               reuse=true
-              echo "Reused the live data.json ($(wc -c < data.json) bytes)"
+              echo "Reused the live data.json"
             else
               echo "Live data.json unusable — refreshing instead"
-              rm -f data.json
             fi
           fi
           if [ "$reuse" = false ]; then
+            # refresh_data.py reads data.json as its previous run and overwrites it
+            [ -f prev.json ] && cp prev.json data.json
             python3 refresh_data.py
           fi
 
       - name: Check the data before publishing it
         run: |
           python3 - <<'PY'
-          import json, sys
+          import json, os, sys
           d = json.load(open("data.json"))
           for line in d.get("warnings") or []:
               print(f"::warning::{line}")
@@ -78,6 +89,30 @@ jobs:
           # deploy a gutted data.json over a good one.
           if not d.get("stats", {}).get("price"):
               sys.exit("no price data — refusing to deploy")
+
+          # A price alone is not enough: on 2026-09-14 Blockworks rate-limited
+          # every metric call partway through a run, and a file with a price and
+          # nine missing cards sailed past this check and replaced a good one.
+          # Nothing the live file carries may vanish unless it had already gone
+          # stale past the window refresh_data.py carries forward.
+          def last_date(v):
+              if isinstance(v, list):
+                  return v[-1].get("d") if v and isinstance(v[-1], dict) else None
+              if isinstance(v, dict):
+                  ds = [x[-1]["d"] for x in v.values()
+                        if isinstance(x, list) and x and isinstance(x[-1], dict) and "d" in x[-1]]
+                  return max(ds) if ds else None
+              return None
+          if os.path.exists("prev.json"):
+              from datetime import date, timedelta
+              cut = (date.today() - timedelta(days=10)).isoformat()
+              p = json.load(open("prev.json"))
+              for kind in ("compare", "series"):
+                  lost = [k for k, v in (p.get(kind) or {}).items()
+                          if not (d.get(kind) or {}).get(k) and (last_date(v) or "") >= cut]
+                  if lost:
+                      sys.exit(f"{kind} lost {sorted(lost)} against the live file "
+                               f"— refusing to deploy")
           PY
 
       - name: Assemble the site
