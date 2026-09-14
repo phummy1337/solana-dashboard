@@ -18,11 +18,16 @@ on:
         description: "Rebuild data.json from the upstream APIs"
         type: boolean
         default: true
+      seed_run:
+        description: "Recovery: take data.json from this run's Pages artifact instead of the live site"
+        type: string
+        default: ""
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read           # recovery seeding reads an earlier run's artifact
 
 concurrency:
   group: pages
@@ -46,11 +51,22 @@ jobs:
           BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
           EVENT: ${{ github.event_name }}
           WANT_REFRESH: ${{ github.event.inputs.refresh }}
+          SEED_RUN: ${{ github.event.inputs.seed_run }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Recovery hatch: when the live file is already damaged, take the
+          # baseline from an earlier build of this same site instead. It is the
+          # site's own artifact, so nothing new is exposed and nothing is added
+          # to the repo.
+          if [ -n "$SEED_RUN" ]; then
+            gh run download "$SEED_RUN" -R "$GITHUB_REPOSITORY" -n github-pages -D seed
+            tar -xf seed/artifact.tar -C seed
+            cp seed/data.json prev.json
+            echo "Seeded from run $SEED_RUN ($(wc -c < prev.json) bytes)"
           # The live file is fetched on every run, not just the ones that reuse
           # it: a refresh carries its series forward for anything the upstream
           # fails to return, and the publish check below compares against it.
-          if curl -fsS --max-time 120 -o prev.json https://stateofsol.com/data.json \
+          elif curl -fsS --max-time 120 -o prev.json https://stateofsol.com/data.json \
              && python3 -c "import json,sys; sys.exit(0 if json.load(open('prev.json')).get('stats',{}).get('price') else 1)"; then
             echo "Fetched the live data.json ($(wc -c < prev.json) bytes)"
           else
