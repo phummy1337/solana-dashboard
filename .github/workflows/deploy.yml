@@ -8,10 +8,15 @@ on:
   push:
     branches: [main]
   schedule:
-    # Measured from refresh-commit history: Blockworks lands the previous UTC
-    # day anywhere between ~08:00 and ~19:00 UTC. Run every 2h through that
-    # window (max ~2h lag), plus an early pass for prices/yields/reserves.
-    - cron: "15 4,8,10,12,14,16,18,20 * * *"
+    # Blockworks lands the previous UTC day anywhere between ~08:00 and ~19:00
+    # UTC. Four passes across that window catch it within ~4h and the last one
+    # is late enough to be certain of it.
+    #
+    # Not every two hours any more: the key is metered monthly, and eight runs
+    # a day at ~16 calls each is ~3,900 calls a month, which is what exhausted
+    # it on 2026-09-14 and blanked most of the dashboard. Four is ~1,900, and
+    # DEX volume and stablecoin supply have since moved to keyless DefiLlama.
+    - cron: "15 9,12,15,19 * * *"
   workflow_dispatch:
     inputs:
       refresh:

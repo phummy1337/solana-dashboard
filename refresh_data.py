@@ -56,10 +56,7 @@ CHARTS = {
 CHAINS_ALL = ["solana", "ethereum", "base", "arbitrum", "bnb", "avalanche",
               "sui", "tron", "hyperevm", "polygon", "robinhood"]
 # Robinhood Chain launched 2026-04-30, so its series simply start later than
-# the rest; it has no stablecoin-supply series at all and is dropped from that
-# card on its own, since compare_metric omits a chain that returns nothing.
-CHAINS_DEX = ["solana", "ethereum", "base", "arbitrum", "bnb", "avalanche",
-              "sui", "hyperevm", "robinhood"]
+# the rest; a chain that returns nothing is dropped from its card on its own.
 LLAMA_SLUGS = {"solana": "Solana", "ethereum": "Ethereum", "base": "Base",
                "arbitrum": "Arbitrum", "bnb": "BSC", "avalanche": "Avalanche",
                "sui": "Sui", "tron": "Tron", "hyperevm": "Hyperliquid",
@@ -218,6 +215,23 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         warn(f"spot price: {e}")
 
+    # Every price tile, and the publish check that gates the whole deploy, hangs
+    # off these two calls. A carried history plus a keyless quote keeps the site
+    # shipping through a Blockworks outage instead of freezing everything —
+    # including the DefiLlama and CoinGecko series, which are perfectly healthy.
+    if not prices:
+        prices = {p["d"]: p["v"] for p in (prev_all.get("series") or {}).get("price") or []}
+        if prices:
+            warn(f"price series: reused the previous run's ({len(prices)} days, "
+                 f"through {max(prices)})")
+    if spot is None:
+        try:
+            spot = get("https://api.coingecko.com/api/v3/simple/price"
+                       "?ids=solana&vs_currencies=usd")["solana"]["usd"]
+            print(f"  spot price (CoinGecko): ${spot}")
+        except Exception as e:  # noqa: BLE001
+            warn(f"spot price fallback: {e}")
+
     # 24h return from the rolling-24h OHLCV open vs the live spot quote.
     try:
         o = bw("v1/assets/solana/ohlcv")
@@ -268,7 +282,8 @@ def main() -> int:
 
     txns = sum_metric("transaction-total", "ytd_transactions", also_series=True)
     fees_usd = sum_metric("transaction-fee-total-usd", "ytd_fees_usd")
-    dex = sum_metric("dex-spot-volume-total-usd", "ytd_dex_volume", also_series=True)
+    # DEX volume and stablecoin supply now come from DefiLlama, further down —
+    # same numbers for the tile and the cross-chain card, from one fetch.
 
     if txns:
         d0 = max(txns)
@@ -280,8 +295,6 @@ def main() -> int:
         daily["fees_usd"] = fees_usd[d0]
         if txns.get(d0):
             daily["fee_avg"] = fees_usd[d0] / txns[d0]
-    if dex:
-        daily["dex_volume"] = dex[max(dex)]
 
     # Average TPS across the year so far, measured against elapsed wall-clock
     # rather than a nominal 365 days.
@@ -293,9 +306,6 @@ def main() -> int:
     # Volume-weighted, not a mean of daily averages.
     if stats.get("ytd_fees_usd") and stats.get("ytd_transactions"):
         stats["avg_fee_ytd"] = stats["ytd_fees_usd"] / stats["ytd_transactions"]
-
-    if stats.get("ytd_dex_volume") and stats.get("ytd_dex_volume_days"):
-        stats["avg_daily_dex_volume_ytd"] = stats["ytd_dex_volume"] / stats["ytd_dex_volume_days"]
 
     # ----------------------------------------------------------- DeFi TVL
     # Blockworks carries no Solana chain-TVL series, so this one comes from
@@ -319,22 +329,6 @@ def main() -> int:
             print(f"  DeFi TVL: ${stats['defi_tvl']:,.0f} ({max(tvl)})")
     except Exception as e:  # noqa: BLE001
         warn(f"defillama tvl: {e}")
-
-    # ---------------------------------------------------- stablecoin supply
-    try:
-        s = metric("stablecoin-supply-total-usd")
-        if s:
-            stats["stablecoin_supply"] = s[max(s)]
-            stats["stablecoin_supply_as_of"] = max(s)
-            ytd_open = s.get(PREV_YEAR_END) or at_or_before(s, date(YEAR - 1, 12, 31), 30)
-            if ytd_open:
-                stats["stablecoin_supply_ytd_change"] = ((stats["stablecoin_supply"] / ytd_open) - 1) * 100
-            data["series"]["stablecoin_supply"] = [
-                {"d": d, "v": s[d]} for d in sorted(s) if d >= f"{YEAR - 5}-01-01"
-            ]
-            print(f"  stablecoin supply: ${stats['stablecoin_supply']:,.0f}")
-    except Exception as e:  # noqa: BLE001
-        warn(f"stablecoin-supply-total-usd: {e}")
 
     # ------------------------------------------------------------ REV (SOL)
     # Chart 103 is denominated in SOL, verified against transaction-fee-total-usd:
@@ -501,8 +495,76 @@ def main() -> int:
     compare_metric("active-address-total", "active_addresses", CHAINS_ALL)
     compare_metric("transaction-succeed-total", "succeeded", CHAINS_ALL)
     compare_metric("transaction-total", "transactions", CHAINS_ALL)
-    compare_metric("dex-spot-volume-total-usd", "dex_volume", CHAINS_DEX)
-    compare_metric("stablecoin-supply-total-usd", "stablecoin_supply", CHAINS_ALL)
+
+    # ------------------------------------- DEX volume + stablecoins (DefiLlama)
+    # Both used to come from Blockworks, against a monthly request quota that ran
+    # out mid-September. DefiLlama is keyless and, on the evidence, the better
+    # source for these two anyway: it covers Tron and Polygon, which Blockworks
+    # has no DEX series for, and it carries stablecoin supply for all eleven
+    # chains where Blockworks had eight — three of them (Base, Arbitrum,
+    # Avalanche) frozen since May. It is also a day fresher. Solana's own DEX
+    # volume agreed with Blockworks to within 1-7% daily; the other chains read
+    # higher, because DefiLlama tracks more venues per chain. Whole histories are
+    # replaced rather than spliced, so no series has a seam in it.
+    def llama_chain_series(key: str, label: str, fetch) -> dict[str, float]:
+        """Fill compare[key] from one DefiLlama call per chain. Returns Solana's
+        own dated series, so the tiles read the same numbers as the card."""
+        out, solana = {}, {}
+        for chain, slug in LLAMA_SLUGS.items():
+            try:
+                s = fetch(urllib.parse.quote(slug))
+                pts = [{"d": d, "v": s[d]} for d in sorted(s) if since <= d < today_utc]
+                if pts:
+                    out[chain] = pts
+                if chain == "solana":
+                    solana = {d: v for d, v in s.items() if d < today_utc}
+            except Exception as e:  # noqa: BLE001 - one chain missing is survivable
+                warn(f"{label} {chain}: {e}")
+            time.sleep(1.5)   # firing eleven at once gets some back empty
+        if out:
+            compare[key] = out
+            print(f"  compare {label}: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+        return solana
+
+    def _dex_volume(slug: str) -> dict[str, float]:
+        j = get(f"https://api.llama.fi/overview/dexs/{slug}?excludeTotalDataChart=false"
+                "&excludeTotalDataChartBreakdown=true&dataType=dailyVolume")
+        return {datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat(): v
+                for t, v in (j.get("totalDataChart") or []) if v}
+
+    def _stablecoins(slug: str) -> dict[str, float]:
+        out = {}
+        for r in get(f"https://stablecoins.llama.fi/stablecoincharts/{slug}"):
+            tot = r.get("totalCirculatingUSD")
+            # Every peg in one number: a chain's dollar stablecoins are the bulk
+            # of it, but EUR and gold pegs are supply on the chain too.
+            v = sum(tot.values()) if isinstance(tot, dict) else tot
+            if v:
+                out[datetime.fromtimestamp(int(r["date"]), tz=timezone.utc).date().isoformat()] = v
+        return out
+
+    dex = llama_chain_series("dex_volume", "dex volume", _dex_volume)
+    stables = llama_chain_series("stablecoin_supply", "stablecoin supply", _stablecoins)
+
+    if dex:
+        y = ytd(dex)
+        stats["ytd_dex_volume"] = sum(y.values())
+        stats["ytd_dex_volume_days"] = len(y)
+        if y:
+            stats["avg_daily_dex_volume_ytd"] = stats["ytd_dex_volume"] / len(y)
+        daily["dex_volume"] = dex[max(dex)]
+        data["series"]["ytd_dex_volume"] = [{"d": d, "v": dex[d]} for d in sorted(dex) if d >= since]
+        print(f"  dex volume: YTD ${stats['ytd_dex_volume']:,.0f} over {len(y)} days")
+    if stables:
+        d0 = max(stables)
+        stats["stablecoin_supply"] = stables[d0]
+        stats["stablecoin_supply_as_of"] = d0
+        ytd_open = stables.get(PREV_YEAR_END) or at_or_before(stables, date(YEAR - 1, 12, 31), 30)
+        if ytd_open:
+            stats["stablecoin_supply_ytd_change"] = ((stables[d0] / ytd_open) - 1) * 100
+        data["series"]["stablecoin_supply"] = [{"d": d, "v": stables[d]}
+                                               for d in sorted(stables) if d >= since]
+        print(f"  stablecoin supply: ${stats['stablecoin_supply']:,.0f} ({d0})")
 
     # ------------------------------------------------- fee stability (FSR)
     # DFDV's Fee Stability Ratio: 1 / (median fee x median-fee volatility),
