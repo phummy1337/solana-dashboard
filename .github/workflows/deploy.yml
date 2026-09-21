@@ -27,6 +27,10 @@ on:
         description: "Recovery: take data.json from this run's Pages artifact instead of the live site"
         type: string
         default: ""
+      seed_url:
+        description: "Recovery: fetch data.json from this URL instead of the live site"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -57,13 +61,19 @@ jobs:
           EVENT: ${{ github.event_name }}
           WANT_REFRESH: ${{ github.event.inputs.refresh }}
           SEED_RUN: ${{ github.event.inputs.seed_run }}
+          SEED_URL: ${{ github.event.inputs.seed_url }}
           GH_TOKEN: ${{ github.token }}
         run: |
           # Recovery hatch: when the live file is already damaged, take the
           # baseline from an earlier build of this same site instead. It is the
           # site's own artifact, so nothing new is exposed and nothing is added
-          # to the repo.
-          if [ -n "$SEED_RUN" ]; then
+          # to the repo. seed_url does the same from a one-off location, for a
+          # baseline repaired by hand.
+          if [ -n "$SEED_URL" ]; then
+            curl -fsSL --max-time 180 -o prev.json "$SEED_URL"
+            python3 -c "import json,sys; sys.exit(0 if json.load(open('prev.json')).get('stats',{}).get('price') else 1)"
+            echo "Seeded from seed_url ($(wc -c < prev.json) bytes)"
+          elif [ -n "$SEED_RUN" ]; then
             gh run download "$SEED_RUN" -R "$GITHUB_REPOSITORY" -n github-pages -D seed
             tar -xf seed/artifact.tar -C seed
             cp seed/data.json prev.json
