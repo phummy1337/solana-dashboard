@@ -126,7 +126,7 @@ jobs:
               return None
           if os.path.exists("prev.json"):
               from datetime import date, timedelta
-              cut = (date.today() - timedelta(days=10)).isoformat()
+              cut = (date.today() - timedelta(days=30)).isoformat()   # matches refresh_data.py
               p = json.load(open("prev.json"))
               for kind in ("compare", "series"):
                   lost = [k for k, v in (p.get(kind) or {}).items()

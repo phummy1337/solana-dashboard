@@ -1130,7 +1130,11 @@ def main() -> int:
     # Only dated series are carried: every card prints the date of its own last
     # point, so a stale curve reads as stale. Point-in-time stats carry no date
     # and would simply look current, so those stay blank when a fetch fails.
-    carry_cut = (date.today() - timedelta(days=10)).isoformat()
+    # Long enough to bridge a monthly quota: Blockworks stopped answering on
+    # 2026-09-14 with its series ending 09-12, and the cap resets on 10-01.
+    # At ten days the carry would have expired on 09-23 and taken nine cards
+    # with it — the exact outage it was written to prevent, just later.
+    carry_cut = (date.today() - timedelta(days=30)).isoformat()
     for kind, fresh in (("compare", compare), ("series", data["series"])):
         for key, val in (prev_all.get(kind) or {}).items():
             if fresh.get(key):
