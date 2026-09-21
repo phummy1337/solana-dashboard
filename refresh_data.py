@@ -1170,6 +1170,45 @@ def main() -> int:
             warn(f"daily: nothing fetched this run — kept the previous block "
                  f"(through {old_daily['as_of']})")
 
+    # Each Daily tile reads the newest point of its own series. Normally those
+    # land together; through an outage they don't, so a tile fed by a series
+    # that stopped earlier than the block's `as_of` carries its own date and the
+    # card prints it. An empty tile is no more honest than a dated one, and it
+    # is a good deal less useful.
+    def fill_daily(field, series_key, source=None):
+        pts = source if source is not None else (data["series"].get(series_key) or [])
+        if daily.get(field) is not None or not pts:
+            return None
+        tail = pts[-1]
+        if tail["d"] < carry_cut:
+            return None
+        daily[field] = tail["v"]
+        if tail["d"] != daily.get("as_of"):
+            daily[f"{field}_as_of"] = tail["d"]
+        return tail["d"]
+
+    filled = {}
+    for field, key in (("traders", "traders"), ("perps_volume", "perps"),
+                       ("tokenized_equity_volume", "tokenized_equity_volume")):
+        got = fill_daily(field, key)
+        if got:
+            filled[field] = got
+    # Solana's own REV lives in the cross-chain block rather than in `series`.
+    got = fill_daily("revenue_usd", None, (compare.get("rev") or {}).get("solana") or [])
+    if got:
+        filled["revenue_usd"] = got
+        px = prices.get(got) or (prices.get(max(prices)) if prices else None)
+        if px:
+            daily["revenue_sol"] = daily["revenue_usd"] / px
+    if stats.get("tokenized_equity_supply") is None:
+        sup = data["series"].get("tokenized_equity_supply") or []
+        if sup and sup[-1]["d"] >= carry_cut:
+            stats["tokenized_equity_supply"] = sup[-1]["v"]
+            filled["tokenized_equity_supply"] = sup[-1]["d"]
+    if filled:
+        warn("daily tiles filled from carried series: "
+             + ", ".join(f"{k} ({v})" for k, v in sorted(filled.items())))
+
     data["daily"] = daily
     data["warnings"] = warnings
 

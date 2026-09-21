@@ -1981,20 +1981,28 @@ function renderTiles() {
     ? dm.dex_volume + dm.perps_volume : null;
   const tradedYtd = s.ytd_dex_volume != null && s.ytd_perps_volume != null
     ? s.ytd_dex_volume + s.ytd_perps_volume : null;
+  // A tile whose own series stopped before the header's date says so itself,
+  // rather than borrowing the freshness of the tiles beside it.
+  const lag = (field, sub) => {
+    const d0 = dm[field + '_as_of'];
+    return d0 ? (sub ? sub + ' · ' : '') + fmtDate(d0) : sub;
+  };
   const T = mode === 'daily' ? [
     ['Avg. TPS', nf(dm.tps), 'non-vote transactions'],
     ['Transactions', compact(dm.transactions), ''],
     ['Avg. Transaction Fee', dm.fee_avg != null ? '$' + dm.fee_avg.toFixed(4) : '—',
       dm.fees_usd ? usd(dm.fees_usd) + ' total' : ''],
-    ['Revenue', usd(dm.revenue_usd), dm.revenue_sol ? compact(dm.revenue_sol) + ' SOL' : ''],
+    ['Revenue', usd(dm.revenue_usd),
+      lag('revenue_usd', dm.revenue_sol ? compact(dm.revenue_sol) + ' SOL' : '')],
     ['DEX Volume', usd(dm.dex_volume), 'spot, all DEXs'],
-    ['Active Traders', compact(dm.traders), 'unique wallets'],
+    ['Active Traders', compact(dm.traders), lag('traders', 'unique wallets')],
     ['DeFi TVL', usd(s.defi_tvl), tvlSub],
     ['Stablecoin Supply', usd(s.stablecoin_supply), stableSub],
     ['Tokenized Equity', usd(s.tokenized_equity_supply), 'on-chain supply'],
-    ['Tokenized Equity Volume', usd(dm.tokenized_equity_volume), ''],
+    ['Tokenized Equity Volume', usd(dm.tokenized_equity_volume),
+      lag('tokenized_equity_volume', '')],
     ['Total Trading Volume', usd(tradedDaily), 'spot + perps'],
-    ['Perps Volume', usd(dm.perps_volume), 'futures notional'],
+    ['Perps Volume', usd(dm.perps_volume), lag('perps_volume', 'futures notional')],
   ] : [
     [`Avg. TPS ${yr}`, nf(s.avg_tps_ytd), 'non-vote transactions'],
     ['YTD Transactions', compact(s.ytd_transactions), ytdAvgTx ? compact(ytdAvgTx) + ' per day' : ''],
