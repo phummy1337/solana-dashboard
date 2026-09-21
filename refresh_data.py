@@ -1205,8 +1205,38 @@ def main() -> int:
         if sup and sup[-1]["d"] >= carry_cut:
             stats["tokenized_equity_supply"] = sup[-1]["v"]
             filled["tokenized_equity_supply"] = sup[-1]["d"]
+    # The YTD snapshot sums the same carried series the Daily tiles read, so it
+    # can be rebuilt the same way rather than shipping half a panel of dashes.
+    def ytd_sum(stat, series_key, source=None, mean=False):
+        if stats.get(stat) is not None:
+            return None
+        pts = source if source is not None else (data["series"].get(series_key) or [])
+        y = [p for p in pts if p["d"] >= YTD_START.isoformat()]
+        if not y or y[-1]["d"] < carry_cut:
+            return None
+        total = sum(p["v"] for p in y)
+        stats[stat] = total / len(y) if mean else total
+        return f"{y[-1]['d']}, {len(y)}d"
+
+    sol_rev = (compare.get("rev") or {}).get("solana") or []
+    for stat, key, src, mean in (
+            ("ytd_revenue_usd", None, sol_rev, False),
+            ("avg_daily_traders_ytd", "traders", None, True),
+            ("ytd_perps_volume", "perps", None, False),
+            ("ytd_tokenized_equity_volume", "tokenized_equity_volume", None, False)):
+        got = ytd_sum(stat, key, src, mean)
+        if got:
+            filled[stat] = got
+    # REV is carried in dollars; the SOL figure is what it bought at each close.
+    if stats.get("ytd_revenue_sol") is None and stats.get("ytd_revenue_usd") is not None and prices:
+        last_px = prices.get(max(prices))
+        tot = sum(p["v"] / (prices.get(p["d"]) or last_px) for p in sol_rev
+                  if p["d"] >= YTD_START.isoformat() and (prices.get(p["d"]) or last_px))
+        if tot:
+            stats["ytd_revenue_sol"] = tot
+
     if filled:
-        warn("daily tiles filled from carried series: "
+        warn("tiles filled from carried series: "
              + ", ".join(f"{k} ({v})" for k, v in sorted(filled.items())))
 
     data["daily"] = daily
