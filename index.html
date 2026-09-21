@@ -559,6 +559,7 @@
         <select class="rsel" id="priceRange" aria-label="Time period">
           <option value="30">1M</option>
           <option value="90">3M</option>
+          <option value="qtd">QTD</option>
           <option value="ytd">YTD</option>
           <option value="365">1Y</option>
           <option value="1826">5Y</option>
@@ -2026,9 +2027,11 @@ function renderTiles() {
 function drawPrice() {
   if (state.levered) return drawLevered();
   let pts = state.priceSeries;
-  if (state.range === 'ytd') {
-    const jan1 = `${new Date().getUTCFullYear()}-01-01`;
-    pts = pts.filter(p => p.x >= jan1);
+  if (state.range === 'ytd' || state.range === 'qtd') {
+    const start = state.range === 'ytd'
+      ? `${new Date().getUTCFullYear()}-01-01`
+      : periodStart(new Date().toISOString().slice(0, 10), 'q');
+    pts = pts.filter(p => p.x >= start);
   } else if (state.range === 'custom') {
     if (state.from) pts = pts.filter(p => p.x >= state.from);
   } else if (state.range !== 'all') {
@@ -2131,6 +2134,8 @@ function drawLevered() {
   // zero. "All" is the full series, which begins at the anchor.
   let anchor = base0;
   if (state.range === 'ytd') anchor = maxDate(anchor, `${new Date().getUTCFullYear()}-01-01`);
+  else if (state.range === 'qtd')
+    anchor = maxDate(anchor, periodStart(new Date().toISOString().slice(0, 10), 'q'));
   else if (state.range === 'custom') anchor = maxDate(anchor, state.from);
   else if (state.range !== 'all')
     anchor = maxDate(anchor, new Date(Date.now() - Number(state.range) * 86400000)

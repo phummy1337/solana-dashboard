@@ -224,10 +224,13 @@ def main() -> int:
         if prices:
             warn(f"price series: reused the previous run's ({len(prices)} days, "
                  f"through {max(prices)})")
+    cg_24h = None
     if spot is None:
         try:
-            spot = get("https://api.coingecko.com/api/v3/simple/price"
-                       "?ids=solana&vs_currencies=usd")["solana"]["usd"]
+            j = get("https://api.coingecko.com/api/v3/simple/price"
+                    "?ids=solana&vs_currencies=usd&include_24hr_change=true")["solana"]
+            spot = j["usd"]
+            cg_24h = j.get("usd_24h_change")
             print(f"  spot price (CoinGecko): ${spot}")
         except Exception as e:  # noqa: BLE001
             warn(f"spot price fallback: {e}")
@@ -241,6 +244,11 @@ def main() -> int:
             print(f"  24h return: {stats['return_24h']:+.2f}%")
     except Exception as e:  # noqa: BLE001
         warn(f"ohlcv 24h: {e}")
+    # CoinGecko hands back a 24h change with the quote, which is the same
+    # measure the tile wants and the only one available when Blockworks is out.
+    if stats.get("return_24h") is None and cg_24h is not None:
+        stats["return_24h"] = cg_24h
+        warn(f"24h return: taken from the CoinGecko quote ({cg_24h:+.2f}%)")
 
     if prices:
         latest_date = max(prices)
