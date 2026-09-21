@@ -1145,6 +1145,20 @@ def main() -> int:
                 warn(f"{kind}.{key}: nothing fetched this run — kept the previous "
                      f"series (through {was})")
 
+    # Year-to-date totals are just sums of a series we already carried, so
+    # recompute them from it rather than shipping a null tile. Derived from the
+    # carried data, not carried themselves: nothing here can be staler than the
+    # series it is summed from.
+    if stats.get("ytd_transactions") is None:
+        ser = data["series"].get("ytd_transactions") or []
+        ytd_pts = [p for p in ser if p["d"] >= YTD_START.isoformat()]
+        if ytd_pts:
+            stats["ytd_transactions"] = sum(p["v"] for p in ytd_pts)
+            stats["ytd_transactions_days"] = len(ytd_pts)
+            stats["avg_tps_ytd"] = stats["ytd_transactions"] / (len(ytd_pts) * 86400)
+            warn(f"ytd_transactions: recomputed from the carried series "
+                 f"({len(ytd_pts)} days through {ytd_pts[-1]['d']})")
+
     # The Daily view prints "latest complete day · <date>" above these tiles, so
     # a carried block reads as dated in exactly the way a carried series does.
     # Without this the tiles sat empty for the whole Blockworks outage while the
