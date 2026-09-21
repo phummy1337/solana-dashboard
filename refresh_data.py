@@ -1145,6 +1145,17 @@ def main() -> int:
                 warn(f"{kind}.{key}: nothing fetched this run — kept the previous "
                      f"series (through {was})")
 
+    # The Daily view prints "latest complete day · <date>" above these tiles, so
+    # a carried block reads as dated in exactly the way a carried series does.
+    # Without this the tiles sat empty for the whole Blockworks outage while the
+    # cards beside them showed the same days' numbers quite happily.
+    if not daily.get("as_of"):
+        old_daily = prev_all.get("daily") or {}
+        if old_daily.get("as_of", "") >= carry_cut:
+            daily.update(old_daily)
+            warn(f"daily: nothing fetched this run — kept the previous block "
+                 f"(through {old_daily['as_of']})")
+
     data["daily"] = daily
     data["warnings"] = warnings
 
