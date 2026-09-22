@@ -1215,7 +1215,12 @@ def main() -> int:
     if not daily.get("as_of"):
         old_daily = prev_all.get("daily") or {}
         if old_daily.get("as_of", "") >= carry_cut:
-            daily.update(old_daily)
+            # setdefault, not update: this run may already have produced some of
+            # these from a source that is still up, and the previous block must
+            # not overwrite them. That is what left the Perps tile reading the
+            # old Blockworks figure while the card beside it read DefiLlama's.
+            for k, v in old_daily.items():
+                daily.setdefault(k, v)
             warn(f"daily: nothing fetched this run — kept the previous block "
                  f"(through {old_daily['as_of']})")
 
