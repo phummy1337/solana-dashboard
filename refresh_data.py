@@ -1178,6 +1178,18 @@ def main() -> int:
             warn(f"daily: nothing fetched this run — kept the previous block "
                  f"(through {old_daily['as_of']})")
 
+    # Total fees is the one input with no series behind it — it only ever
+    # existed as a scalar — so it cannot be recomputed, only carried. Tie it to
+    # the daily block's date, which is the period it belongs to.
+    if stats.get("ytd_fees_usd") is None:
+        prev_stats = prev_all.get("stats") or {}
+        prev_as_of = (prev_all.get("daily") or {}).get("as_of", "")
+        if prev_stats.get("ytd_fees_usd") and prev_as_of >= carry_cut:
+            stats["ytd_fees_usd"] = prev_stats["ytd_fees_usd"]
+            if prev_stats.get("avg_fee_ytd"):
+                stats["avg_fee_ytd"] = prev_stats["avg_fee_ytd"]
+            warn(f"ytd_fees_usd: kept the previous value (through {prev_as_of})")
+
     # Each Daily tile reads the newest point of its own series. Normally those
     # land together; through an outage they don't, so a tile fed by a series
     # that stopped earlier than the block's `as_of` carries its own date and the
