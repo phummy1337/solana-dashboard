@@ -580,12 +580,72 @@ def main() -> int:
         return {datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat(): v
                 for t, v in (j.get("totalDataChart") or []) if v}
 
+    # Fees, three ways. DefiLlama separates what users pay the *chain* from what
+    # they pay the *apps* on it, and splits each into gross fees and the slice
+    # actually retained as revenue. `/summary/fees/{chain}` treats the chain
+    # itself as a protocol (category "Chain"); `/overview/fees/{chain}` is every
+    # protocol deployed on it. All on the keyless host.
+    def _chain_fees(slug: str, data_type: str = "dailyFees") -> dict[str, float]:
+        # The chain's protocol slug is its name lowercased and hyphenated —
+        # "Robinhood Chain" is "robinhood-chain", and an unhyphenated space
+        # fails before the request is even sent.
+        # llama_chain_series hands these over percent-encoded for the path-style
+        # endpoints; this one wants a hyphenated protocol slug instead, so undo
+        # that first — "Robinhood%20Chain" has to become "robinhood-chain".
+        name = urllib.parse.unquote(slug).lower().replace(" ", "-")
+        j = get(f"https://api.llama.fi/summary/fees/{name}"
+                f"?excludeTotalDataChartBreakdown=true&dataType={data_type}")
+        return {datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat(): v
+                for t, v in (j.get("totalDataChart") or []) if v}
+
+    def _chain_revenue(slug: str) -> dict[str, float]:
+        return _chain_fees(slug, "dailyRevenue")
+
+    def _app_fees(slug: str) -> dict[str, float]:
+        j = get(f"https://api.llama.fi/overview/fees/{slug}?excludeTotalDataChart=false"
+                "&excludeTotalDataChartBreakdown=true&dataType=dailyFees")
+        return {datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat(): v
+                for t, v in (j.get("totalDataChart") or []) if v}
+
     dex = llama_chain_series("dex_volume", "dex volume", _dex_volume)
     stables = llama_chain_series("stablecoin_supply", "stablecoin supply", _stablecoins)
     perps = llama_chain_series("perps_volume", "perps volume", _perps,
                                slugs={**LLAMA_SLUGS, "hyperevm": "Hyperliquid L1"}) if DL_KEY else {}
+    llama_chain_series("chain_fees", "chain fees", _chain_fees)
+    llama_chain_series("chain_revenue", "chain revenue", _chain_revenue)
+    llama_chain_series("app_fees", "app fees", _app_fees)
     if not DL_KEY:
         warn("perps volume: DEFILLAMA_API_KEY is not set — skipped (paid endpoint)")
+
+    # RWA: one Pro call covers every chain at once — a rare case where the paid
+    # endpoint is cheaper than the free pattern, so take it. Note the RWA paths
+    # sit at the Pro host root, NOT under /api like the rest of the Pro surface.
+    if DL_KEY:
+        try:
+            rows = get(f"{DL_PRO}/{DL_KEY}/rwa/chart/chain-breakdown")
+            by: dict = {}
+            for r in rows:
+                ts = r.get("timestamp")
+                if not ts:
+                    continue
+                d0 = datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+                if d0 < since or d0 >= today_utc:
+                    continue
+                for name, v in r.items():
+                    if name == "timestamp" or not isinstance(v, (int, float)) or v <= 0:
+                        continue
+                    by.setdefault(name, {})[d0] = v
+            want = {v: k for k, v in LLAMA_SLUGS.items()}
+            out = {}
+            for name, series in by.items():
+                chain = want.get(name)
+                if chain and series:
+                    out[chain] = [{"d": d, "v": series[d]} for d in sorted(series)]
+            if out:
+                compare["rwa_aum"] = out
+                print("  compare rwa aum: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+        except Exception as e:  # noqa: BLE001
+            warn(f"rwa aum: {e}")
 
     if perps:
         y = ytd(perps)
@@ -1328,7 +1388,7 @@ def main() -> int:
     PLACES = {
         "rev": 0, "dex_volume": 0, "defi_tvl": 0, "stablecoin_supply": 0,
         "tokenized_equity_volume": 0, "transactions": 0, "active_addresses": 0,
-        "perps_volume": 0,
+        "perps_volume": 0, "chain_fees": 0, "chain_revenue": 0, "app_fees": 0, "rwa_aum": 0,
         "app_revenue": 0,
         "rev_share": 2, "tx_per_address": 2, "fsr": 2,
         # fee_vol is a dollar amount on the same scale as fee_median — sub-cent
