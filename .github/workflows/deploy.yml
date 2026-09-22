@@ -58,6 +58,8 @@ jobs:
       - name: Obtain data.json
         env:
           BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
+          # Metered: perps only, ~11 calls per refresh. See refresh_data.py.
+          DEFILLAMA_API_KEY: ${{ secrets.DEFILLAMA_API_KEY }}
           EVENT: ${{ github.event_name }}
           WANT_REFRESH: ${{ github.event.inputs.refresh }}
           SEED_RUN: ${{ github.event.inputs.seed_run }}
