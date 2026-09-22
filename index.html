@@ -1090,6 +1090,8 @@ const TRENDS = [
     noteUnit: ' · average transactions per second',
     tip: '<b>In simple terms:</b> the average number of transactions each chain settles per second, worked out from its daily count.<br><br><b>Why it matters:</b> it is the plainest read on raw throughput — how much traffic a network actually carries, rather than how much it claims it could.' },
   { key: 'ytd_dex_volume',          compare: 'dex_volume',        title: 'Spot DEX Volume',   color: '#14F195', fmt: usd, agg: 'sum' },
+  { key: 'perps_volume', compare: 'perps_volume', title: 'Perps Volume', color: '#22D3EE', fmt: usd, agg: 'sum',
+    tip: '<b>In simple terms:</b> the notional value of perpetual-futures trades settled on each chain — leveraged bets on price, rather than spot swaps of the asset itself.<br><br><b>Why it matters:</b> perps are where most crypto trading volume actually lives, and they concentrate on whichever chain offers the fastest, cheapest execution. Read it next to Spot DEX Volume: a chain can be quiet on spot and still be a major venue, or the reverse. Source: DefiLlama.' },
   { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply', color: '#E9469A', fmt: usd, agg: 'last' },
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',          color: '#4ADE80', fmt: usd, agg: 'last' },
   { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd, agg: 'sum' },

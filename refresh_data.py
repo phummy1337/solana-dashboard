@@ -33,6 +33,18 @@ except ImportError:
 
 BW_BASE = "https://api.blockworks.com"
 BW_KEY = os.environ.get("BLOCKWORKS_API_KEY", "").strip()
+# DefiLlama's free API covers everything we ask of it except perps, which sits
+# behind their paid plan. METERED — this key has a monthly allowance, and the
+# Blockworks cap running out mid-September took most of the dashboard down with
+# it. Budget: perps is the ONLY paid call, one per chain (11) per refresh, and
+# the cron runs 4x daily => ~1,320 calls a month. Everything else on this file
+# stays on the keyless api.llama.fi. Before adding another paid endpoint, work
+# out its monthly cost the same way and say so in a comment. A single call to
+# /overview/derivatives would be cheaper but breaks down by protocol rather than
+# by chain, so it cannot answer "volume per chain" without us inventing the
+# attribution ourselves.
+DL_KEY = os.environ.get("DEFILLAMA_API_KEY", "").strip()
+DL_PRO = "https://pro-api.llama.fi"
 OUT = Path(__file__).parent / "data.json"
 
 YEAR = date.today().year
@@ -514,11 +526,13 @@ def main() -> int:
     # volume agreed with Blockworks to within 1-7% daily; the other chains read
     # higher, because DefiLlama tracks more venues per chain. Whole histories are
     # replaced rather than spliced, so no series has a seam in it.
-    def llama_chain_series(key: str, label: str, fetch) -> dict[str, float]:
+    def llama_chain_series(key: str, label: str, fetch, slugs=None) -> dict[str, float]:
         """Fill compare[key] from one DefiLlama call per chain. Returns Solana's
-        own dated series, so the tiles read the same numbers as the card."""
+        own dated series, so the tiles read the same numbers as the card.
+        `slugs` overrides the default names where a dimension spells a chain
+        differently (perps calls Hyperliquid "Hyperliquid L1")."""
         out, solana = {}, {}
-        for chain, slug in LLAMA_SLUGS.items():
+        for chain, slug in (slugs or LLAMA_SLUGS).items():
             try:
                 s = fetch(urllib.parse.quote(slug))
                 pts = [{"d": d, "v": s[d]} for d in sorted(s) if since <= d < today_utc]
@@ -551,8 +565,35 @@ def main() -> int:
                 out[datetime.fromtimestamp(int(r["date"]), tz=timezone.utc).date().isoformat()] = v
         return out
 
+    # Perps: DefiLlama's own per-chain attribution, which is the whole point of
+    # paying for it — their breakdown endpoint splits by protocol, and deciding
+    # which chain each of forty perp venues belongs to is not a judgement this
+    # script should be making. Reads ~71-81% of the Blockworks Solana figure it
+    # replaces (they track more venues), so the whole history is swapped rather
+    # than spliced. Their derivatives slug for Hyperliquid is "Hyperliquid L1".
+    def _perps(slug: str) -> dict[str, float]:
+        if not DL_KEY:
+            raise RuntimeError("DEFILLAMA_API_KEY is not set")
+        j = get(f"{DL_PRO}/{DL_KEY}/api/overview/derivatives/{slug}"
+                "?excludeTotalDataChart=false&excludeTotalDataChartBreakdown=true"
+                "&dataType=dailyVolume")
+        return {datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat(): v
+                for t, v in (j.get("totalDataChart") or []) if v}
+
     dex = llama_chain_series("dex_volume", "dex volume", _dex_volume)
     stables = llama_chain_series("stablecoin_supply", "stablecoin supply", _stablecoins)
+    perps = llama_chain_series("perps_volume", "perps volume", _perps,
+                               slugs={**LLAMA_SLUGS, "hyperevm": "Hyperliquid L1"}) if DL_KEY else {}
+    if not DL_KEY:
+        warn("perps volume: DEFILLAMA_API_KEY is not set — skipped (paid endpoint)")
+
+    if perps:
+        y = ytd(perps)
+        stats["ytd_perps_volume"] = sum(y.values())
+        daily["perps_volume"] = perps[max(perps)]
+        daily.pop("perps_volume_as_of", None)
+        data["series"]["perps"] = [{"d": d, "v": perps[d]} for d in sorted(perps) if d >= since]
+        print(f"  perps volume: YTD ${stats['ytd_perps_volume']:,.0f} over {len(y)} days")
 
     if dex:
         y = ytd(dex)
@@ -1282,6 +1323,7 @@ def main() -> int:
     PLACES = {
         "rev": 0, "dex_volume": 0, "defi_tvl": 0, "stablecoin_supply": 0,
         "tokenized_equity_volume": 0, "transactions": 0, "active_addresses": 0,
+        "perps_volume": 0,
         "app_revenue": 0,
         "rev_share": 2, "tx_per_address": 2, "fsr": 2,
         # fee_vol is a dollar amount on the same scale as fee_median — sub-cent
