@@ -1519,8 +1519,28 @@ async function buildTrendImage(key, title, fmt, el) {
 }
 
 async function downloadTrendImage(key, title, fmt, el, range) {
-  const cv = await buildTrendImage(key, title, fmt, el);
+  // Same reasoning as the price card: the range was already in the filename but
+  // not on the image, so two exports of the same chart over different windows
+  // arrived looking identical.
+  const win = rangeTitle(range);
+  const cv = await buildTrendImage(key, title + (win ? ` — ${win}` : ''), fmt, el);
   if (cv) saveCanvas(cv, `state-of-solana-${key.replace(/_/g, '-')}-${range}.png`);
+}
+
+/* What window is this image of? A downloaded card travels without the control
+   that produced it, so the range has to be written on the card itself —
+   otherwise a quarter-to-date export and a five-year one are indistinguishable
+   apart from the axis. */
+const RANGE_TITLES = { qtd: 'Quarter to Date', ytd: 'Year to Date', '1d': 'Latest Day',
+                       '1w': 'Past Week', '1m': 'Past Month', '3m': 'Past 3 Months',
+                       '6m': 'Past 6 Months', '1y': 'Past Year', '2y': 'Past 2 Years',
+                       '5y': 'Past 5 Years', custom: 'Custom Range' };
+function rangeTitle(range) {
+  if (range === '30') return RANGE_TITLES['1m'];
+  if (range === '90') return RANGE_TITLES['3m'];
+  if (range === '365') return RANGE_TITLES['1y'];
+  if (range === '1826') return RANGE_TITLES['5y'];
+  return RANGE_TITLES[range] || '';
 }
 
 /* Price chart export: reflects range, scale and the rainbow overlay. */
@@ -1548,11 +1568,18 @@ async function downloadPriceImage() {
       yOpt().position = savedPos;
       drawPrice();                     // puts the live view's ticks back too
     }
-    const cv = await buildShareImage(snap,
-      priceChart.$atBottom ? 'Since the SOL Bottom: DFDV vs. SOL' : 'DFDV vs. SOL',
+    // "Since the SOL Bottom" already names its own window, so it is left alone;
+    // every other range gets the window appended.
+    const win = rangeTitle(state.range);
+    const title = priceChart.$atBottom
+      ? 'Since the SOL Bottom: DFDV vs. SOL'
+      : 'DFDV vs. SOL' + (win ? ` — ${win}` : '');
+    const cv = await buildShareImage(snap, title,
       `${AGG_LABEL[state.agg]}, rebased to ${fmtDate(priceChart.$leverAnchor)} · latest point is to date`,
       items, pctSigned);
-    if (cv) saveCanvas(cv, 'state-of-solana-levered-sol.png');
+    const slug = priceChart.$atBottom ? 'since-sol-bottom'
+               : (win ? win.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'all');
+    if (cv) saveCanvas(cv, `state-of-solana-levered-sol-${slug}.png`);
     return;
   }
   const sel = $('priceRange');
