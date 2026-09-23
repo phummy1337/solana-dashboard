@@ -2168,14 +2168,21 @@ function drawLevered() {
   const allDfdv = (src?.points || []).map(p => ({ x: p.d, y: p.v }));
   // The range selector re-anchors rather than cropping: a shorter window means
   // "how did the two compare over that window", so both lines still start at
-  // zero. "All" is the full series, which begins at the anchor.
+  // zero.
+  //
+  // "All" keeps the SOL-bottom anchor, which is the framing this overlay was
+  // built for. Every other range clamps to the first DFDV close we hold, NOT to
+  // that anchor — clamping to the anchor is what made YTD, 1Y and 5Y all render
+  // as the same chart, since each of them starts before 2026-06-06.
+  const firstDfdv = allDfdv[0]?.x || base0;
   let anchor = base0;
-  if (state.range === 'ytd') anchor = maxDate(anchor, `${new Date().getUTCFullYear()}-01-01`);
+  const floor = d => maxDate(firstDfdv, d);
+  if (state.range === 'ytd') anchor = floor(`${new Date().getUTCFullYear()}-01-01`);
   else if (state.range === 'qtd')
-    anchor = maxDate(anchor, periodStart(new Date().toISOString().slice(0, 10), 'q'));
-  else if (state.range === 'custom') anchor = maxDate(anchor, state.from);
+    anchor = floor(periodStart(new Date().toISOString().slice(0, 10), 'q'));
+  else if (state.range === 'custom') anchor = floor(state.from);
   else if (state.range !== 'all')
-    anchor = maxDate(anchor, new Date(Date.now() - Number(state.range) * 86400000)
+    anchor = floor(new Date(Date.now() - Number(state.range) * 86400000)
       .toISOString().slice(0, 10));
   const dfdvPts = allDfdv.filter(p => p.x >= anchor);
   // End on the last date both sides actually have a value for. SOL runs on a

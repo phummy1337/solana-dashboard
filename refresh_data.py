@@ -1114,9 +1114,14 @@ def main() -> int:
         # the natural base for "how much of the recovery did the levered
         # instrument capture".
         anchor = "2026-06-06"
-        start = (date.fromisoformat(anchor) - timedelta(days=10)).isoformat()
+        # Fetch everything Nasdaq holds, not just the stretch since the anchor.
+        # Keeping only the post-anchor closes meant YTD, 1Y and 5Y on the levered
+        # chart all clamped to 2026-06-06 and rendered identically — the control
+        # looked broken because there was no earlier data to re-anchor to. The
+        # series starts 2023-07-25 (as Janover), so 5Y and All bottom out there.
+        start = "2023-01-01"
         u = ("https://api.nasdaq.com/api/quote/DFDV/historical?assetclass=stocks"
-             f"&fromdate={start}&todate={date.today().isoformat()}&limit=400")
+             f"&fromdate={start}&todate={date.today().isoformat()}&limit=3000")
         j = get(u, {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
         rows = ((j.get("data") or {}).get("tradesTable") or {}).get("rows") or []
         closes = {}
@@ -1127,10 +1132,10 @@ def main() -> int:
         # close. Carry the last close at or before it so both sides are measured
         # from the same moment — starting DFDV at the next trading day would
         # hand SOL a free run of however many days the market was shut.
-        ordered = sorted(closes.items())
-        pre = [kv for kv in ordered if kv[0] <= anchor]
-        pts = [{"d": k, "v": round(v, 4)}
-               for k, v in (pre[-1:] if pre else []) + [kv for kv in ordered if kv[0] > anchor]]
+        # Every close, in order. The chart picks its own base off whichever
+        # anchor the selected range resolves to, and needs the closes either
+        # side of it to do that.
+        pts = [{"d": k, "v": round(v, 4)} for k, v in sorted(closes.items())]
         if len(pts) < 5:
             raise RuntimeError(f"only {len(pts)} closes since {anchor}")
         # Today has no close until the bell, so the chart would sit a day behind
