@@ -519,7 +519,7 @@
 </header>
 
 <!-- ---------------------------------------------------------------- price -->
-<div class="shead">
+<div class="shead" id="price">
   <h2>Price &amp; Returns</h2><span class="rule"></span>
   <span class="asof" id="priceAsOf"></span>
 </div>
@@ -2493,27 +2493,51 @@ $('rainbowBtn').addEventListener('click', () => {
   if (state.rainbow) setScale('logarithmic');
   drawPrice();
 });
-$('leveredBtn').addEventListener('click', () => {
-  state.levered = !state.levered;
-  $('leveredBtn').setAttribute('aria-pressed', String(state.levered));
-  if (state.levered) {
-    if (state.rainbow) {                     // one overlay at a time: $ vs %
-      state.rainbow = false;
-      $('rainbowBtn').setAttribute('aria-pressed', 'false');
+/* DFDV-vs-SOL is the view people want to send someone straight to, so it has a
+   URL of its own: stateofsol.com/#levered. The button and the link share this
+   one path, and the hash is kept in step either way — replaceState rather than
+   pushState, so toggling doesn't fill up the back button. */
+const LEVERED_HASH = '#levered';
+function setLevered(on, { scroll = false } = {}) {
+  if (on !== state.levered) {
+    state.levered = on;
+    $('leveredBtn').setAttribute('aria-pressed', String(on));
+    if (on) {
+      if (state.rainbow) {                   // one overlay at a time: $ vs %
+        state.rainbow = false;
+        $('rainbowBtn').setAttribute('aria-pressed', 'false');
+      }
+      // Daily is the readable resolution over a window this short. Remember what
+      // the candle view was using: daily candles across five years are a smear,
+      // and drawLevered forces a linear axis that the price chart doesn't want
+      // back either.
+      state.preLeverAgg = state.agg;
+      state.preLeverScale = state.scale;
+      setAgg('d');
+    } else {
+      setAgg(state.preLeverAgg || 'w');
+      setScale(state.preLeverScale || 'logarithmic');
     }
-    // Daily is the readable resolution over a window this short. Remember what
-    // the candle view was using: daily candles across five years are a smear,
-    // and drawLevered forces a linear axis that the price chart doesn't want
-    // back either.
-    state.preLeverAgg = state.agg;
-    state.preLeverScale = state.scale;
-    setAgg('d');
-  } else {
-    setAgg(state.preLeverAgg || 'w');
-    setScale(state.preLeverScale || 'logarithmic');
+    syncPriceControls();
+    drawPrice();
+    history.replaceState(null, '', on ? LEVERED_HASH : location.pathname + location.search);
   }
-  syncPriceControls();
-  drawPrice();
+  // scrollTo rather than scrollIntoView: the latter no-ops when the element is
+  // already within the viewport, which it is on a tall screen, and the point of
+  // the link is to put the chart at the top whatever the screen height.
+  if (scroll) {
+    const el = $('price');
+    // Two-arg scrollTo, not the options object: the smooth-behaviour form is
+    // silently ignored in some embedded viewers, and a link that lands nowhere
+    // is worse than one that lands without an animation. scrollIntoView is out
+    // for the same reason — it no-ops when the target is already on screen.
+    if (el) scrollTo(0, el.getBoundingClientRect().top + scrollY - 10);
+  }
+}
+$('leveredBtn').addEventListener('click', () => setLevered(!state.levered));
+// Someone pasting the link into an already-open tab should get the view too.
+addEventListener('hashchange', () => {
+  if (state.dfdv) setLevered(/^#levered(-sol)?$/i.test(location.hash), { scroll: true });
 });
 
 /* ----------------------------------------------------- yield products table */
@@ -3006,6 +3030,8 @@ async function loadHighlights() {
   await Promise.all([loadData(), loadNetwork(), loadSupply(), loadHighlights()]);
   await extendPriceSeries();
   tickSpotPrice();
+  // After loadData, so state.dfdv exists and the button is no longer hidden.
+  if (state.dfdv && /^#levered(-sol)?$/i.test(location.hash)) setLevered(true, { scroll: true });
   await loadValidators();
   setInterval(async () => { await loadNetwork(); loadValidators(); }, CONFIG.NET_REFRESH_MS);
   setInterval(tickSpotPrice, 5 * 60 * 1000);
