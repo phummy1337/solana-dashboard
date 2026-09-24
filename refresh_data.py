@@ -625,8 +625,68 @@ def main() -> int:
         newest = max((pts[-1]["d"] for pts in prev_block.values() if pts), default="")
         return newest < yesterday
 
-    perps = {}
-    if not DL_KEY:
+    def local_series(key: str, label: str,
+                     require_cover: bool = False) -> tuple[bool, dict[str, float]]:
+        """Use a capture of DefiLlama's own front end, if one is current.
+
+        tools/llama_local.py writes these from the __NEXT_DATA__ payload the
+        perps and RWA pages server-render. Each capture carries the entire
+        history, so this replaces the block wholesale rather than splicing —
+        mixing two sources inside one chain's series would put a visible step
+        in the chart, and the chains do not all agree between them (Ethereum
+        perps reads ~0.87 of the paid endpoint; the other ten match to four
+        decimals).
+
+        Returns (used, solana) — `used` says whether the capture was taken, kept
+        separate from the Solana series because a block can legitimately be
+        current and still not break Solana out.
+        """
+        path = Path(__file__).resolve().parent / "local" / f"{key}.json"
+        if not path.exists():
+            return False, {}
+        try:
+            blob = json.loads(path.read_text())
+            chains = blob.get("chains") or {}
+            # A capture that has gone stale is worse than no capture: it would
+            # pin the card to an old day and look live. Fall through to the API
+            # instead and let the warning say why.
+            if (blob.get("last") or "") < yesterday:
+                warn(f"{label}: local capture ends {blob.get('last')} "
+                     f"(want {yesterday}) — falling back")
+                return False, {}
+            out = {}
+            for chain, s in chains.items():
+                pts = [{"d": d, "v": v} for d, v in sorted(s.items())
+                       if since <= d < today_utc]
+                if pts:
+                    out[chain] = pts
+            if not out:
+                return False, {}
+            # The RWA page groups everything outside its top-N into "Others",
+            # so a capture of it covers five of the ten chains that card shows.
+            # Taking it anyway would quietly halve the card, which looks like a
+            # data change rather than a source change. Refuse unless the capture
+            # covers everything already published.
+            if require_cover:
+                have = set((prev_all.get("compare") or {}).get(key) or {})
+                short = have - set(out)
+                if short:
+                    warn(f"{label}: local capture omits {', '.join(sorted(short))} "
+                         f"— falling back rather than dropping chains")
+                    return False, {}
+            compare[key] = out
+            print(f"  compare {label} (local capture {blob.get('last')}): "
+                  + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+            return True, {d: v for d, v in (chains.get("solana") or {}).items()
+                          if d < today_utc}
+        except Exception as e:  # noqa: BLE001 - a bad capture must not stop the run
+            warn(f"{label}: local capture unreadable ({e}) — falling back")
+            return False, {}
+
+    used_local, perps = local_series("perps_volume", "perps volume")
+    if used_local:
+        pass          # a current capture beats the metered call; nothing to do
+    elif not DL_KEY:
         warn("perps volume: DEFILLAMA_API_KEY is not set — skipped (paid endpoint)")
     elif not needs_refetch("perps_volume"):
         print("  perps volume: already current — skipped (metered endpoint)")
@@ -641,7 +701,9 @@ def main() -> int:
     # RWA: one Pro call covers every chain at once — a rare case where the paid
     # endpoint is cheaper than the free pattern, so take it. Note the RWA paths
     # sit at the Pro host root, NOT under /api like the rest of the Pro surface.
-    if DL_KEY and not needs_refetch("rwa_aum"):
+    if local_series("rwa_aum", "rwa aum", require_cover=True)[0]:
+        pass          # a current capture beats the metered call
+    elif DL_KEY and not needs_refetch("rwa_aum"):
         print("  rwa aum: already current — skipped (metered endpoint)")
     elif DL_KEY:
         try:

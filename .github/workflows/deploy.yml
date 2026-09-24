@@ -50,6 +50,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Captures of DefiLlama's front end, kept in a private repo rather than
+      # this public one so their dataset is not archived in a world-readable
+      # git history. refresh_data.py prefers them over the metered API and
+      # falls back on its own when they are absent or stale, so a missing
+      # token degrades to the old behaviour instead of failing the build.
+      - name: Fetch the data captures
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: phummy1337/solana-dashboard-data
+          # A read-only deploy key on that repo, not a PAT: it cannot reach any
+          # other repo and cannot write to this one.
+          ssh-key: ${{ secrets.DATA_REPO_SSH_KEY }}
+          path: .captures
+
+      - name: Stage the captures
+        run: |
+          if [ ! -d .captures/local ]; then
+            echo "no captures — perps and RWA fall back to the API"
+            exit 0
+          fi
+          cp -r .captures/local ./local
+          python3 - <<'PY'
+          import glob, json
+          for f in sorted(glob.glob("local/*.json")):
+              b = json.load(open(f))
+              print(f'  {f} -> {b["last"]} ({len(b["chains"])} chains)')
+          PY
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
