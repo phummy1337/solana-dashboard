@@ -10,6 +10,10 @@
  * Secrets (wrangler secret put ...):
  *   GH_TOKEN  fine-grained PAT, repo phummy1337/solana-dashboard,
  *             Contents: Read and write (what /dispatches checks). Nothing else.
+ *   TEST_KEY  a throwaway string gating the manual trigger below. Separate from
+ *             GH_TOKEN on purpose: the first draft reused the PAT as the URL
+ *             key, which would have put a repo-write credential into shell
+ *             history, proxy logs and Cloudflare's request log.
  */
 
 const REPO = "phummy1337/solana-dashboard";
@@ -44,15 +48,17 @@ export default {
   },
 
   // Manual trigger, so the wiring can be tested without waiting for a cron:
-  //   curl -X POST https://<worker>/?key=<GH_TOKEN>
-  // Gated on the same secret rather than left open, since it starts a build.
+  //   curl -X POST "https://<worker>/?key=<TEST_KEY>"
+  // Returns GitHub's own status and body, which is the whole point — a silent
+  // failure here is indistinguishable from GitHub being slow.
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.searchParams.get("key") !== env.GH_TOKEN) {
+    if (!env.TEST_KEY || url.searchParams.get("key") !== env.TEST_KEY) {
       return new Response("not found", { status: 404 });
     }
     const res = await fire(env, "manual");
-    return new Response(res.ok ? "dispatched\n" : `failed: ${res.status}\n`, {
+    const detail = res.ok ? "" : ` ${(await res.text()).slice(0, 300)}`;
+    return new Response(`github: ${res.status}${detail}\n`, {
       status: res.ok ? 200 : 502,
     });
   },

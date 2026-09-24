@@ -32,15 +32,36 @@ token ever stops.
    npx wrangler deploy
    ```
 
-3. **Check the wiring** without waiting for a cron:
+3. **Set a throwaway key for the manual trigger** and deploy:
 
    ```bash
-   curl -X POST "https://stateofsol-cron.<your-subdomain>.workers.dev/?key=<GH_TOKEN>"
+   npx wrangler secret put TEST_KEY     # any random string
+   npx wrangler deploy
    ```
 
-   Expect `dispatched`, then a run appearing under Actions within seconds. The
-   endpoint is gated on the same secret rather than left open, because it
-   starts a build.
+   This is deliberately *not* GH_TOKEN. The first draft reused the PAT as the
+   URL key, which would have put a repo-write credential into shell history,
+   proxy logs and Cloudflare's own request log.
+
+4. **Check the wiring** without waiting for a cron:
+
+   ```bash
+   curl -X POST "https://stateofsol-cron.apxusd-supply-1337.workers.dev/?key=<TEST_KEY>"
+   ```
+
+   Expect `github: 204` — GitHub returns 204 No Content on a successful
+   dispatch — and a run under Actions within seconds. Any other status is
+   printed with GitHub's own error body, since a silent failure here looks
+   exactly like GitHub being slow. Note secrets take a few seconds to
+   propagate; a `not found` immediately after `secret put` usually just means
+   retry.
+
+## Verified
+
+Deployed 2026-09-24. Manual dispatch returned `github: 204` and a
+`repository_dispatch` run started within 20 seconds, against GitHub's own
+scheduler taking 2-3 hours. A fine-grained PAT with **Contents: Read and
+write** is confirmed sufficient — the Actions permission is not needed.
 
 ## Changing the schedule
 
