@@ -1,0 +1,16 @@
+name = "stateofsol-cron"
+main = "src/index.js"
+compatibility_date = "2026-09-24"
+
+# The refresh schedule itself. Blockworks lands the previous UTC day anywhere
+# between ~08:00 and ~19:00 UTC, so these four passes cover that window and the
+# last is late enough to be sure of it — the same cadence GitHub was asked for
+# and kept missing.
+#
+# Cloudflare fires these within seconds of the stated minute, so unlike the
+# GitHub cron they can be pinned to a clock edge if a job ever needs that.
+[triggers]
+crons = ["15 9 * * *", "15 12 * * *", "15 15 * * *", "15 19 * * *"]
+
+[observability]
+enabled = true

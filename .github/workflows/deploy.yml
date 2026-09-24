@@ -7,16 +7,18 @@ name: Build and deploy
 on:
   push:
     branches: [main]
+  # Primary schedule: a Cloudflare Worker cron trigger (see worker/) fires this
+  # on time. GitHub's own `schedule` event is best-effort — measured on this
+  # repo over six days it delivered 2-3 of 4 runs a day, with the last one
+  # landing 2-3 hours late — which is fine for a dashboard but useless if you
+  # ever want a job pinned to a clock edge.
+  repository_dispatch:
+    types: [refresh]
   schedule:
-    # Blockworks lands the previous UTC day anywhere between ~08:00 and ~19:00
-    # UTC. Four passes across that window catch it within ~4h and the last one
-    # is late enough to be certain of it.
-    #
-    # Not every two hours any more: the key is metered monthly, and eight runs
-    # a day at ~16 calls each is ~3,900 calls a month, which is what exhausted
-    # it on 2026-09-14 and blanked most of the dashboard. Four is ~1,900, and
-    # DEX volume and stablecoin supply have since moved to keyless DefiLlama.
-    - cron: "15 9,12,15,19 * * *"
+    # Kept as a safety net, not the primary trigger: one late run a day is far
+    # better than none if the Worker or its token ever stops. Deliberately off
+    # the hour, which is when GitHub's queue is most congested.
+    - cron: "37 20 * * *"
   workflow_dispatch:
     inputs:
       refresh:
