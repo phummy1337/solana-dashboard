@@ -609,18 +609,41 @@ def main() -> int:
 
     dex = llama_chain_series("dex_volume", "dex volume", _dex_volume)
     stables = llama_chain_series("stablecoin_supply", "stablecoin supply", _stablecoins)
-    perps = llama_chain_series("perps_volume", "perps volume", _perps,
-                               slugs={**LLAMA_SLUGS, "hyperevm": "Hyperliquid L1"}) if DL_KEY else {}
+    # Perps and RWA are the only metered calls we make. DefiLlama publishes them
+    # once a day; the cron runs four times. So skip the fetch when the carried
+    # block already holds yesterday — the history lives in data.json and is
+    # carried forward regardless, which makes a skipped run cost nothing and
+    # lose nothing. Self-healing: a failed or missed day leaves the block stale,
+    # so the next run picks it up. Takes Pro spend from ~1,440 calls a month to
+    # ~360 without changing a single published number.
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    def needs_refetch(block_key: str) -> bool:
+        prev_block = (prev_all.get("compare") or {}).get(block_key) or {}
+        if not prev_block:
+            return True
+        newest = max((pts[-1]["d"] for pts in prev_block.values() if pts), default="")
+        return newest < yesterday
+
+    perps = {}
+    if not DL_KEY:
+        warn("perps volume: DEFILLAMA_API_KEY is not set — skipped (paid endpoint)")
+    elif not needs_refetch("perps_volume"):
+        print("  perps volume: already current — skipped (metered endpoint)")
+    else:
+        perps = llama_chain_series("perps_volume", "perps volume", _perps,
+                                   slugs={**LLAMA_SLUGS, "hyperevm": "Hyperliquid L1"})
+
     llama_chain_series("chain_fees", "chain fees", _chain_fees)
     llama_chain_series("chain_revenue", "chain revenue", _chain_revenue)
     llama_chain_series("app_fees", "app fees", _app_fees)
-    if not DL_KEY:
-        warn("perps volume: DEFILLAMA_API_KEY is not set — skipped (paid endpoint)")
 
     # RWA: one Pro call covers every chain at once — a rare case where the paid
     # endpoint is cheaper than the free pattern, so take it. Note the RWA paths
     # sit at the Pro host root, NOT under /api like the rest of the Pro surface.
-    if DL_KEY:
+    if DL_KEY and not needs_refetch("rwa_aum"):
+        print("  rwa aum: already current — skipped (metered endpoint)")
+    elif DL_KEY:
         try:
             rows = get(f"{DL_PRO}/{DL_KEY}/rwa/chart/chain-breakdown")
             by: dict = {}
