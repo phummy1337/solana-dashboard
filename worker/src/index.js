@@ -9,7 +9,7 @@
  *
  * Secrets (wrangler secret put ...):
  *   GH_TOKEN  fine-grained PAT, repo phummy1337/solana-dashboard,
- *             Actions: Read and write. Nothing else.
+ *             Contents: Read and write (what /dispatches checks). Nothing else.
  */
 
 const REPO = "phummy1337/solana-dashboard";

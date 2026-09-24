@@ -16,8 +16,11 @@ token ever stops.
 1. **Create a fine-grained GitHub token.** Settings → Developer settings →
    Personal access tokens → Fine-grained tokens → Generate new token.
    - Repository access: **only** `phummy1337/solana-dashboard`
-   - Permissions: **Actions → Read and write**. Nothing else — that one
-     permission is all `repository_dispatch` needs.
+   - Permissions: **Contents → Read and write**. That is what the dispatch
+     endpoint checks; despite triggering a workflow it is not gated on the
+     Actions permission. If a dispatch comes back `403`, add **Actions → Read
+     and write** as well and re-test — the manual endpoint below reports the
+     status immediately, so this takes seconds to confirm either way.
    - Set an expiry you will actually notice; the fallback cron covers the gap
      if it lapses, but the dashboard drops to one refresh a day until renewed.
 
