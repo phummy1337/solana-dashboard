@@ -213,26 +213,77 @@ def main() -> int:
     daily: dict = {}
 
     # ---------------------------------------------------------------- price
-    prices: dict[str, float] = {}
-    try:
-        prices = metric("token-price-usd")
-        print(f"  price series: {len(prices)} days")
-    except Exception as e:  # noqa: BLE001
-        warn(f"price series: {e}")
+    # Coinbase, not Blockworks. The price series gates the whole deploy and
+    # feeds the monthly-returns table, and Blockworks is a metered monthly
+    # allowance — when it runs out mid-month every price on the site freezes,
+    # which is what happened through September 2026. Coinbase is keyless,
+    # unmetered and publishes a daily close for SOL-USD back to 2021-06-17.
+    #
+    # It is also the more trustworthy number: on the days Blockworks and
+    # Coinbase disagreed, CoinGecko independently matched Coinbase to the cent
+    # (2026-09-09: Coinbase 101.54, CoinGecko 101.57, Blockworks 103.53).
+    #
+    # Before 2021-06-17 Coinbase had not listed SOL, so the carried history
+    # stands for those dates. That join is fixed in the past and never moves.
+    CB_START = "2021-06-17"
 
+    def coinbase_closes(since: str) -> dict[str, float]:
+        """Daily SOL-USD closes from Coinbase, paginated.
+
+        The candles endpoint caps at 300 rows per call, so walk forward in
+        chunks. ~6 calls covers the whole listed history; they are keyless and
+        unmetered, so rebuilding the series every run costs nothing and keeps
+        one consistent source rather than splicing a tail onto a stale head.
+        """
+        out: dict[str, float] = {}
+        start = date.fromisoformat(max(since, CB_START))
+        today = date.today()
+        while start <= today:
+            end = min(start + timedelta(days=299), today)
+            rows = get("https://api.exchange.coinbase.com/products/SOL-USD/candles"
+                       f"?granularity=86400&start={start.isoformat()}T00:00:00Z"
+                       f"&end={end.isoformat()}T00:00:00Z")
+            for r in rows or []:
+                # [time, low, high, open, close, volume]
+                d0 = datetime.fromtimestamp(r[0], tz=timezone.utc).date().isoformat()
+                if r[4]:
+                    out[d0] = float(r[4])
+            start = end + timedelta(days=1)
+            time.sleep(0.4)          # public limit is 10/s; stay well under it
+        return out
+
+    prices: dict[str, float] = {}
+    carried = {p["d"]: p["v"] for p in (prev_all.get("series") or {}).get("price") or []}
+    try:
+        cb = coinbase_closes(CB_START)
+        if len(cb) < 500:
+            raise RuntimeError(f"only {len(cb)} closes returned — looks truncated")
+        # Everything Coinbase covers comes from Coinbase; older dates keep the
+        # history already published. `update` order matters: Coinbase wins on
+        # any date both hold.
+        prices = {d: v for d, v in carried.items() if d < CB_START}
+        prices.update(cb)
+        print(f"  price series: {len(prices)} days (Coinbase from {CB_START}, "
+              f"through {max(prices)})")
+    except Exception as e:  # noqa: BLE001
+        warn(f"price series (Coinbase): {e}")
+
+    # Live quote, for the tile that shows the current price rather than a close.
+    # Coinbase's ticker is keyless and is the same venue the series comes from,
+    # so the tile and the chart cannot disagree about which exchange they mean.
     spot = None
     try:
-        spot = bw("v1/assets/solana/price").get("usd")
+        spot = float(get("https://api.exchange.coinbase.com/products/SOL-USD/ticker")["price"])
         print(f"  spot price: ${spot}")
     except Exception as e:  # noqa: BLE001
-        warn(f"spot price: {e}")
+        warn(f"spot price (Coinbase): {e}")
 
-    # Every price tile, and the publish check that gates the whole deploy, hangs
-    # off these two calls. A carried history plus a keyless quote keeps the site
-    # shipping through a Blockworks outage instead of freezing everything —
-    # including the DefiLlama and CoinGecko series, which are perfectly healthy.
+    # The publish check that gates the whole deploy hangs off the price series.
+    # Carrying the previous run's keeps the site shipping through an upstream
+    # outage instead of freezing everything — including the DefiLlama series,
+    # which are perfectly healthy.
     if not prices:
-        prices = {p["d"]: p["v"] for p in (prev_all.get("series") or {}).get("price") or []}
+        prices = carried
         if prices:
             warn(f"price series: reused the previous run's ({len(prices)} days, "
                  f"through {max(prices)})")
