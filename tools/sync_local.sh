@@ -27,18 +27,22 @@ fi
 cd "$REPO"
 built=()
 
-# perps is the one that actually comes off the metered API. rwa is extracted
-# too so a capture is on hand, but refresh_data.py will refuse it while the
-# page only breaks out five of the ten chains that card shows.
-for pair in "perps:next_data_latest.json" "rwa:rwa_next_data_latest.json"; do
-  kind="${pair%%:*}"; file="$CAPTURES/${pair##*:}"
-  if [ -f "$file" ]; then
-    python3 tools/llama_local.py "$kind" "$file"
-    built+=("$kind")
-  else
-    echo "  skip $kind — no capture at $file" >&2
-  fi
-done
+# Perps comes from the one all-chains page. RWA needs a capture per chain: its
+# all-chains page buckets everything outside a top-N into "Others", so it can
+# only ever yield five of the ten this card shows.
+if [ -f "$CAPTURES/next_data_latest.json" ]; then
+  python3 tools/llama_local.py perps "$CAPTURES/next_data_latest.json"
+  built+=(perps)
+else
+  echo "  skip perps — no capture at $CAPTURES/next_data_latest.json" >&2
+fi
+
+if ls "$CAPTURES"/rwa_chain_*.json >/dev/null 2>&1; then
+  python3 tools/llama_local.py rwa-chains "$CAPTURES"
+  built+=(rwa)
+else
+  echo "  skip rwa — no rwa_chain_*.json captures in $CAPTURES" >&2
+fi
 
 if [ ${#built[@]} -eq 0 ]; then
   echo "nothing to sync" >&2

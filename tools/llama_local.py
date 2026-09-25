@@ -12,8 +12,13 @@ eleven. This writes only those, so what lands in the repo stays small enough to
 read in a diff and git's delta compression keeps the daily churn cheap.
 
 Usage:
-    python3 tools/llama_local.py perps ~/Documents/defillama_data/next_data_latest.json
-    python3 tools/llama_local.py rwa   ~/Documents/defillama_data/rwa_next_data.json
+    python3 tools/llama_local.py perps      ~/Documents/defillama_data/next_data_latest.json
+    python3 tools/llama_local.py rwa-chains ~/Documents/defillama_data
+    python3 tools/llama_local.py rwa        ~/Documents/defillama_data/rwa_next_data_latest.json
+
+rwa-chains reads one capture per chain (rwa_chain_<slug>.json) and is what the
+RWA card uses; plain `rwa` reads the all-chains page, which buckets everything
+outside its top-N into "Others" and so only yields five of the ten.
 """
 
 from __future__ import annotations
@@ -37,13 +42,24 @@ PERPS_DIMS = {
     "polygon": "Polygon", "robinhood": "Robinhood Chain",
 }
 
-# The RWA page groups to a top-N and buckets the rest into "Others", so only
-# five of our eleven are broken out. Anything absent is left to whatever
-# refresh_data.py already carries rather than being silently zeroed.
+# The all-chains RWA page groups to a top-N and buckets the rest into "Others",
+# so only five of our ten are broken out there. Kept for reference; the
+# rwa-chains mode below is what actually feeds the card.
 RWA_DIMS = {
     "ethereum": "Ethereum", "bnb": "BSC", "solana": "Solana",
     "avalanche": "Avalanche", "arbitrum": "Arbitrum",
 }
+
+# Each chain has its own RWA page carrying that chain's full history under a
+# "Total Active AUM" column, which is the way to get all ten without the top-N
+# bucketing. Keyed by the slug in /rwa/chain/{slug}.
+RWA_CHAIN_SLUGS = {
+    "ethereum": "ethereum", "bnb": "bsc", "solana": "solana",
+    "avalanche": "avalanche", "arbitrum": "arbitrum", "base": "base",
+    "polygon": "polygon", "tron": "tron", "sui": "sui",
+    "robinhood": "robinhood-chain",
+}
+RWA_TOTAL_DIM = "Total Active AUM"
 
 
 def _iso(ts: float) -> str:
@@ -124,14 +140,50 @@ def extract(kind: str, path: Path) -> dict:
     return out
 
 
+def extract_rwa_chains(folder: Path) -> dict:
+    """Build the RWA series from one capture per chain.
+
+    The all-chains page buckets everything outside its top-N into "Others", so
+    it can only ever produce five of the ten chains this card shows. Each
+    chain's own page carries that chain's full history instead, under a single
+    "Total Active AUM" column — ten captures, no bucketing.
+
+    A chain whose capture is absent is simply left out; refresh_data.py refuses
+    a capture that drops chains it is already publishing, so a partial folder
+    falls back rather than silently shrinking the card.
+    """
+    out: dict[str, dict[str, float]] = {}
+    for key, slug in RWA_CHAIN_SLUGS.items():
+        path = folder / f"rwa_chain_{slug}.json"
+        if not path.exists():
+            print(f"  .. no capture for {key} ({path.name})", file=sys.stderr)
+            continue
+        dims, rows = _chart(json.loads(path.read_text()))
+        if RWA_TOTAL_DIM not in dims:
+            print(f"  !! {key}: no '{RWA_TOTAL_DIM}' column", file=sys.stderr)
+            continue
+        i = dims.index(RWA_TOTAL_DIM)
+        series = {}
+        for row in rows:
+            v = row[i] if i < len(row) else None
+            if isinstance(v, (int, float)) and v > 0:
+                series[_iso(row[0])] = float(v)
+        if series:
+            out[key] = series
+
+    if not out:
+        raise SystemExit(f"no rwa_chain_*.json captures found in {folder}")
+    return out
+
+
 def main() -> None:
-    if len(sys.argv) != 3 or sys.argv[1] not in ("perps", "rwa"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("perps", "rwa", "rwa-chains"):
         raise SystemExit(__doc__)
     kind, path = sys.argv[1], Path(sys.argv[2]).expanduser()
     if not path.exists():
-        raise SystemExit(f"no such file: {path}")
+        raise SystemExit(f"no such path: {path}")
 
-    series = extract(kind, path)
+    series = extract_rwa_chains(path) if kind == "rwa-chains" else extract(kind, path)
     dates = [d for s in series.values() for d in s]
     payload = {
         "source": "defillama front end (__NEXT_DATA__)",
@@ -142,7 +194,7 @@ def main() -> None:
     }
 
     OUT_DIR.mkdir(exist_ok=True)
-    dest = OUT_DIR / f"{'perps_volume' if kind == 'perps' else 'rwa_aum'}.json"
+    dest = OUT_DIR / ("perps_volume.json" if kind == "perps" else "rwa_aum.json")
     dest.write_text(json.dumps(payload, separators=(",", ":"), sort_keys=False))
 
     print(f"{dest.relative_to(REPO)}  {dest.stat().st_size // 1024} KB")

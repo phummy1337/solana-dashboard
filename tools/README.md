@@ -20,11 +20,18 @@ other would put a visible step in that chart.
 
 **Save the payload. That is the whole job.**
 
-`com.stateofsol.capture-open` opens <https://defillama.com/perps/chains> at 08:30
-each morning. Save its `__NEXT_DATA__` payload to
-`~/Documents/defillama_data/next_data_latest.json` and stop there —
+`com.stateofsol.capture-open` opens all eleven pages at 08:30 each morning
+(`tools/open_captures.sh`, which also prints the filename each one wants). Save
+their `__NEXT_DATA__` payloads into `~/Documents/defillama_data` and stop there —
 `com.stateofsol.capture-watch` watches that folder and does the rest: extract,
 push to the private data repo, trigger a refresh.
+
+| Page | Save as |
+|---|---|
+| `/perps/chains` | `next_data_latest.json` |
+| `/rwa/chain/<slug>` × 10 | `rwa_chain_<slug>.json` |
+
+Slugs: `ethereum bsc solana avalanche arbitrum base polygon tron sui robinhood-chain`
 
 Capturing is deliberately manual. DefiLlama puts a Cloudflare challenge in front
 of those pages, and clearing it unattended is the thing the challenge exists to
@@ -73,14 +80,26 @@ If the key is ever revoked the checkout step is `continue-on-error`, so the
 build carries on and perps falls back to the metered API. It degrades, it does
 not break.
 
-## RWA
+## Why RWA takes ten captures
 
-`tools/llama_local.py rwa` works, but the RWA page groups everything outside its
-top-N into "Others" — it breaks out five of the ten chains that card shows
-(missing base, polygon, robinhood, sui, tron). Its numbers also run 0.77–0.92 of
-the API's, so it is measuring something adjacent, not the same series.
+The all-chains `/rwa` page groups everything outside a top-N into "Others", so
+it only ever breaks out five of the ten chains this card shows — base, polygon,
+robinhood, sui and tron vanish into the bucket. Each chain's own page carries
+its full history under a single "Total Active AUM" column, so `rwa-chains` reads
+one capture per chain and loses nothing.
 
-`refresh_data.py` therefore refuses an RWA capture that omits chains already
-published, and falls back to the API. The extractor still runs so a capture is
-on hand if DefiLlama ever breaks out more chains — at which point the guard
-passes on its own and RWA comes off the API with no code change.
+Two dead ends, recorded so they are not re-tried:
+
+- **The `assets` array** in the all-chains payload reproduces DefiLlama's
+  headline total *exactly* ($37,955,365,140) once stablecoins and governance
+  tokens are filtered out — but its per-chain breakdown does not reconcile with
+  the chain series (0.58x to 1.32x, tron 112x), and it is a snapshot with no
+  history at all.
+- **`rwa_chain_mcap_history.csv`** is a flattened dump of all 6,037 assets. Its
+  `chain` column holds JSON arrays and `_date` holds asset issuance dates; there
+  are zero rows carrying a date and an activeMcap together.
+
+Front-end values run ~0.92 of the API's, consistently, so the series is replaced
+wholesale like perps rather than spliced. `refresh_data.py` refuses any capture
+set that omits a chain it is already publishing and falls back to the API, so a
+half-finished folder degrades instead of shrinking the card.
