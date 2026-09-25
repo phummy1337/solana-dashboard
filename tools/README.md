@@ -18,19 +18,33 @@ other would put a visible step in that chart.
 
 ## Daily routine
 
-1. Open <https://defillama.com/perps/chains>, save the `__NEXT_DATA__` payload
-   to `~/Documents/defillama_data/next_data_latest.json`
-2. Run:
+**Save the payload. That is the whole job.**
 
-   ```bash
-   tools/sync_local.sh
-   ```
+`com.stateofsol.capture-open` opens <https://defillama.com/perps/chains> at 08:30
+each morning. Save its `__NEXT_DATA__` payload to
+`~/Documents/defillama_data/next_data_latest.json` and stop there —
+`com.stateofsol.capture-watch` watches that folder and does the rest: extract,
+push to the private data repo, trigger a refresh.
 
-That extracts the eleven chains we publish, writes a compact file, and pushes it
-to the private data repo. The next build picks it up.
+Capturing is deliberately manual. DefiLlama puts a Cloudflare challenge in front
+of those pages, and clearing it unattended is the thing the challenge exists to
+stop, so nothing here fetches from them — a browser you are sitting at does.
+
+Log: `~/Library/Logs/stateofsol-capture.log`
 
 Skip a day and nothing breaks — the capture carries full history, and if it goes
-stale past yesterday `refresh_data.py` says so and falls back to the API.
+stale past yesterday `refresh_data.py` says so and falls back to the API. Saving
+the same day twice is a no-op: the sync compares the data, not the file, so it
+will not spend a build re-publishing an identical capture.
+
+To run it by hand, or to sync an RWA capture too:
+
+```bash
+tools/sync_local.sh
+```
+
+The agents live in `~/Library/LaunchAgents/com.stateofsol.capture-{open,watch}.plist`.
+Unload either with `launchctl bootout gui/$(id -u)/com.stateofsol.capture-watch`.
 
 ## Why a private repo
 

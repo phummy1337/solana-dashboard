@@ -46,13 +46,29 @@ if [ ${#built[@]} -eq 0 ]; then
 fi
 
 mkdir -p "$DATA_REPO/local"
-cp local/*.json "$DATA_REPO/local/"
+
+# Copy only where the *data* changed. Every extraction stamps a fresh
+# `captured` time, so a plain copy always differs and would push a commit and
+# spend a build on re-capturing an identical day — which the folder watcher
+# would do on any save at all.
+for f in local/*.json; do
+  dest="$DATA_REPO/$f"
+  if [ -f "$dest" ] && python3 -c "
+import json, sys
+a = json.load(open('$f')); b = json.load(open('$dest'))
+sys.exit(0 if (a['chains'], a['last']) == (b['chains'], b['last']) else 1)"; then
+    continue
+  fi
+  cp "$f" "$dest"
+done
 
 cd "$DATA_REPO"
 git add local
 if git diff --cached --quiet; then
+  # Exit 2, not 0: the caller needs to tell "nothing to do" apart from "pushed",
+  # so a re-save of the same day does not spend a build.
   echo "no change — captures already current"
-  exit 0
+  exit 2
 fi
 # Date the commit by the data, not the clock: a capture taken after midnight
 # local time still describes the previous UTC day.
