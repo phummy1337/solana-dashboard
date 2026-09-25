@@ -2462,18 +2462,22 @@ $('priceRange').addEventListener('change', e => {
   }
   syncPriceControls();
   drawPrice();
+  syncPriceUrl();
 });
 $('priceFrom').addEventListener('change', e => {
   state.from = e.target.value || null;
   drawPrice();
+  syncPriceUrl();
 });
 $('priceAgg').addEventListener('change', e => {
   state.agg = e.target.value;
   drawPrice();
+  syncPriceUrl();
 });
 $('priceScale').addEventListener('change', e => {
   state.scale = e.target.value;
   drawPrice();
+  syncPriceUrl();
 });
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('[data-mode]').forEach(o => o.setAttribute('aria-pressed', String(o === b)));
@@ -2526,12 +2530,83 @@ $('rainbowBtn').addEventListener('click', () => {
   // disorienting.
   if (state.rainbow) setScale('logarithmic');
   drawPrice();
+  syncPriceUrl();
 });
-/* DFDV-vs-SOL is the view people want to send someone straight to, so it has a
-   URL of its own: stateofsol.com/#levered. The button and the link share this
-   one path, and the hash is kept in step either way — replaceState rather than
-   pushState, so toggling doesn't fill up the back button. */
-const LEVERED_HASH = '#levered';
+/* The whole price-chart view is addressable, so any arrangement of the controls
+   can be sent to someone: stateofsol.com/#price?range=qtd&agg=d&levered=1.
+   Only what differs from the defaults is written, which keeps the plain page
+   URL clean and the shared ones short. replaceState rather than pushState, so
+   flipping controls doesn't fill up the back button.
+
+   stateofsol.com/#levered still works — it was the original deep link and is
+   already out in the world. */
+const PRICE_HASH = '#price';
+const PRICE_DEFAULTS = { range: 'all', agg: 'w', scale: 'logarithmic',
+                         rainbow: true, levered: false };
+
+function priceHash() {
+  const p = new URLSearchParams();
+  if (state.range !== PRICE_DEFAULTS.range) p.set('range', state.range);
+  // A custom range is meaningless without its start date, so they travel
+  // together or not at all.
+  if (state.range === 'custom' && state.from) p.set('from', state.from);
+  if (!state.levered) {        // levered dictates both; recording them would
+                               // go stale the moment it is switched back off
+    if (state.agg !== PRICE_DEFAULTS.agg) p.set('agg', state.agg);
+    if (state.scale !== PRICE_DEFAULTS.scale) p.set('scale', state.scale);
+  }
+  // The rainbow is on by default, so it is its absence that needs recording.
+  if (state.rainbow !== PRICE_DEFAULTS.rainbow) p.set('rainbow', state.rainbow ? '1' : '0');
+  if (state.levered) p.set('levered', '1');
+  const q = p.toString();
+  return q ? `${PRICE_HASH}?${q}` : '';
+}
+
+function syncPriceUrl() {
+  const h = priceHash();
+  history.replaceState(null, '', h || location.pathname + location.search);
+}
+
+/* Read a shared URL back into the controls. Returns whether anything applied,
+   so the caller knows if it should scroll the chart into view. */
+function applyPriceHash(hash = location.hash) {
+  if (/^#levered(-sol)?$/i.test(hash)) {        // the original deep link
+    if (state.dfdv) setLevered(true, { scroll: true });
+    return true;
+  }
+  const m = /^#price\??(.*)$/i.exec(hash);
+  if (!m) return false;
+  const p = new URLSearchParams(m[1]);
+  const valid = (id, v) => v != null &&
+    [...$(id).options].some(o => o.value === v);
+
+  // Levered first: it forces daily candles and a linear axis of its own, so an
+  // explicit agg or scale in the URL has to be applied after it to survive.
+  if (state.dfdv) setLevered(p.get('levered') === '1');
+
+  const range = p.get('range');
+  if (valid('priceRange', range)) {
+    state.range = range;
+    $('priceRange').value = range;
+    const from = p.get('from');
+    if (range === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(from || '')) {
+      state.from = from;
+      $('priceFrom').value = from;
+    }
+  }
+  const rainbow = p.get('rainbow');
+  if (rainbow != null && !state.levered) {      // one overlay at a time
+    state.rainbow = rainbow === '1';
+    $('rainbowBtn').setAttribute('aria-pressed', String(state.rainbow));
+  }
+  if (valid('priceAgg', p.get('agg'))) setAgg(p.get('agg'));
+  if (valid('priceScale', p.get('scale'))) setScale(p.get('scale'));
+
+  syncPriceControls();
+  drawPrice();
+  syncPriceUrl();
+  return true;
+}
 function setLevered(on, { scroll = false } = {}) {
   if (on !== state.levered) {
     state.levered = on;
@@ -2554,7 +2629,7 @@ function setLevered(on, { scroll = false } = {}) {
     }
     syncPriceControls();
     drawPrice();
-    history.replaceState(null, '', on ? LEVERED_HASH : location.pathname + location.search);
+    syncPriceUrl();
   }
   // scrollTo rather than scrollIntoView: the latter no-ops when the element is
   // already within the viewport, which it is on a tall screen, and the point of
@@ -2570,9 +2645,7 @@ function setLevered(on, { scroll = false } = {}) {
 }
 $('leveredBtn').addEventListener('click', () => setLevered(!state.levered));
 // Someone pasting the link into an already-open tab should get the view too.
-addEventListener('hashchange', () => {
-  if (state.dfdv) setLevered(/^#levered(-sol)?$/i.test(location.hash), { scroll: true });
-});
+addEventListener('hashchange', () => { applyPriceHash(); });
 
 /* ----------------------------------------------------- yield products table */
 const PROJECT_NAMES = {
@@ -3065,7 +3138,7 @@ async function loadHighlights() {
   await extendPriceSeries();
   tickSpotPrice();
   // After loadData, so state.dfdv exists and the button is no longer hidden.
-  if (state.dfdv && /^#levered(-sol)?$/i.test(location.hash)) setLevered(true, { scroll: true });
+  applyPriceHash();
   await loadValidators();
   setInterval(async () => { await loadNetwork(); loadValidators(); }, CONFIG.NET_REFRESH_MS);
   setInterval(tickSpotPrice, 5 * 60 * 1000);
