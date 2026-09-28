@@ -1374,6 +1374,46 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         warn(f"monthly seasonality: {e}")
 
+    # ------------------------------------------- Blockworks terminal backfill
+    # Blockworks meters by calendar month, and when the allowance runs out every
+    # metric 429s until the 1st while the terminal keeps working. This merges
+    # values recovered from the terminal's own CSV exports so those cards keep
+    # moving instead of sitting frozen for the rest of the month.
+    #
+    # The exports are not always the same series as the API: the comparison
+    # charts plot a 7-day trailing mean. tools/desmooth.py inverts that exactly
+    # (verified 1.0000 against our own history) and writes the raw values here,
+    # so what lands in this file is always the same quantity the API returns.
+    # Anything that could not be reconciled is simply absent — fee volatility,
+    # for one, is a different metric on the terminal and was left out.
+    #
+    # Backfilled dates win over carried ones: Blockworks revises the most recent
+    # day after we read it, so the export is the better value for any day both
+    # hold (2026-09-19 Ethereum revenue moved 9.9% after our last good read).
+    try:
+        bf_path = Path(__file__).resolve().parent / "local" / "blockworks_backfill.json"
+        if bf_path.exists():
+            bf = json.loads(bf_path.read_text())
+            for block, chains in bf.items():
+                cur = compare.get(block) or {}
+                if not cur:
+                    continue          # nothing published to merge into
+                added = 0
+                for chain, series in chains.items():
+                    if chain not in cur:
+                        continue      # never introduce a chain the card lacks
+                    by_date = {p["d"]: p["v"] for p in cur[chain]}
+                    for d0, v in series.items():
+                        if since <= d0 < today_utc:
+                            by_date[d0] = v
+                            added += 1
+                    cur[chain] = [{"d": d, "v": by_date[d]} for d in sorted(by_date)]
+                compare[block] = cur
+                newest = max((pts[-1]["d"] for pts in cur.values() if pts), default="?")
+                print(f"  backfill {block}: {added} points merged, now through {newest}")
+    except Exception as e:  # noqa: BLE001 - a bad backfill must not stop the run
+        warn(f"blockworks backfill: {e}")
+
     data["compare"] = compare
 
     # ------------------------------------------------- keep the last good data
