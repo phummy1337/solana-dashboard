@@ -72,11 +72,30 @@ jobs:
             exit 0
           fi
           cp -r .captures/local ./local
-          python3 - <<'PY'
+          # Logging only — it must never fail the build. The directory holds
+          # more than one shape of file (DefiLlama captures carry last/chains,
+          # the Blockworks backfill is keyed by block), so describe whatever is
+          # there rather than assuming.
+          python3 - <<'PY' || true
           import glob, json
           for f in sorted(glob.glob("local/*.json")):
-              b = json.load(open(f))
-              print(f'  {f} -> {b["last"]} ({len(b["chains"])} chains)')
+              try:
+                  b = json.load(open(f))
+              except Exception as e:
+                  print(f"  {f} -> unreadable ({e})")
+                  continue
+              if isinstance(b, dict) and "last" in b and "chains" in b:
+                  print(f'  {f} -> {b["last"]} ({len(b["chains"])} chains)')
+              elif isinstance(b, dict):
+                  parts = []
+                  for block, chains in b.items():
+                      if isinstance(chains, dict):
+                          days = {d for s in chains.values() if isinstance(s, dict) for d in s}
+                          parts.append(f"{block} ({len(chains)} chains"
+                                       + (f", through {max(days)}" if days else "") + ")")
+                  print(f'  {f} -> ' + (", ".join(parts) or "no recognised blocks"))
+              else:
+                  print(f"  {f} -> {type(b).__name__}")
           PY
 
       - uses: actions/setup-python@v5
