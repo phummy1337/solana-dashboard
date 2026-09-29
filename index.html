@@ -1105,14 +1105,16 @@ const TRENDS = [
     tip: '<b>In simple terms:</b> how many distinct wallets transacted on each chain that day.<br><br><b>Why it matters:</b> the broadest measure of reach — how many people (and bots) actually show up. Read it next to REV: many addresses paying little means cheap, accessible activity; few addresses paying a lot means expensive blockspace.' },
   { key: 'tx_per_address', compare: 'tx_per_address', noStack: true, /* a ratio, not a count */ title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
     tip: '<b>In simple terms:</b> successful transactions divided by active wallets — how intensively the average wallet uses a chain each day.<br><br><b>Why it matters:</b> it separates chains people visit from chains people <i>use</i>. A high number means wallets transacting repeatedly, the pattern behind trading, payments and apps rather than one-off transfers. Automated traders lift this on the busiest chains.' },
-  { key: 'ytd_transactions', compare: 'transactions', title: 'Transactions', color: '#38BDF8', fmt: compact, agg: 'sum' },
+  { key: 'ytd_transactions', compare: 'transactions', title: 'Transactions', color: '#38BDF8', fmt: compact, agg: 'sum',
+    noteUnit: ' · Solana excludes vote transactions',
+    tip: '<b>In simple terms:</b> how many transactions each chain settled.<br><br><b>Worth knowing:</b> Solana is counted without consensus votes, which its validators post as ordinary transactions. Including them would roughly treble the figure and would not be comparable with any other chain here. Source: Blockworks.' },
   // Average transactions per second: the bucket's MEAN daily count over 86,400.
   // Taking the mean (not the sum) keeps this correct at every aggregation
   // level, including a partial current week or month.
   { key: 'tps_card', compare: 'transactions', title: 'Transactions per Second', noSmooth: true,
     color: '#38BDF8', fmt: tps, agg: 'mean', perSecond: true,
-    noteUnit: ' · average transactions per second',
-    tip: '<b>In simple terms:</b> the average number of transactions each chain settles per second, worked out from its daily count.<br><br><b>Why it matters:</b> it is the plainest read on raw throughput — how much traffic a network actually carries, rather than how much it claims it could.' },
+    noteUnit: ' · average transactions per second · Solana excludes vote transactions',
+    tip: '<b>In simple terms:</b> the average number of transactions each chain settles per second, worked out from its daily count.<br><br><b>Why it matters:</b> it is the plainest read on raw throughput — how much traffic a network actually carries, rather than how much it claims it could.<br><br><b>Worth knowing:</b> Solana is counted without consensus votes, which its validators post as ordinary transactions. Including them would roughly treble the figure and would not be comparable with any other chain here. Source: Blockworks.' },
   { key: 'ytd_dex_volume',          compare: 'dex_volume',        title: 'Spot DEX Volume',   color: '#14F195', fmt: usd, agg: 'sum' },
   { key: 'chain_fees', compare: 'chain_fees', title: 'Chain Fees', color: '#FBBF24', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> everything users pay the network itself in a day — the gas, priority fees and tips that go to validators or get burned, before any app takes its cut.<br><br><b>Why it matters:</b> this is the chain\u2019s own top line. Read it against Chain Revenue to see how much the network keeps rather than passes through, and against App Fees to see whether the value sits in the rails or in what is built on them. Source: DefiLlama.' },
