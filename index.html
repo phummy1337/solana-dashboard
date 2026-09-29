@@ -844,7 +844,8 @@ const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply
                 agg: 'w', from: null, levered: false, dfdv: null,
                 preLeverAgg: 'w', preLeverScale: 'logarithmic',
                 trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
-                trendHidden: {}, trendAggs: {}, trendFrom: {}, trendSeries: {}, trendCompare: {} };
+                trendHidden: {}, trendAggs: {}, trendFrom: {}, trendSeries: {}, trendCompare: {},
+                trendTypes: {} };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -1067,7 +1068,7 @@ const tps = v => v == null || isNaN(v) ? '—'
 const pct1 = v => v == null || !isFinite(v) ? '—' : v.toFixed(1) + '%';
 const num1 = v => v == null || !isFinite(v) ? '—' : v.toFixed(1);
 const TRENDS = [
-  { key: 'price_perf', compare: 'price_perf', title: 'Price Performance vs Peers', noSmooth: true,
+  { key: 'price_perf', compare: 'price_perf', noStack: true, /* rebased percentages */ title: 'Price Performance vs Peers', noSmooth: true,
     color: '#14F195', fmt: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%', agg: 'last',
     series: PRICE_ASSETS, solKey: 'Solana', rebase: true,
     tip: '<b>In simple terms:</b> every asset starts at 0% on the left edge of whatever window you pick, so the lines show percentage gain or loss from that same starting point — the only fair way to compare a $77,000 coin with a $0.72 one.<br><br><b>Why it matters:</b> it answers whether SOL is outperforming the majors and its direct L1/L2 competitors over your chosen horizon, rather than just moving with the whole market. Data covers the last year (CoinGecko free tier).' },
@@ -1075,11 +1076,11 @@ const TRENDS = [
     tip: '<b>In simple terms:</b> the total amount users actually pay to use a chain each day — fees, tips, and any other revenue the network itself collects.<br><br><b>Why it matters:</b> supply, TVL and transaction counts can all be inflated cheaply; revenue cannot, because someone has to part with real money. It is the cleanest read on genuine demand for blockspace. Source: Blockworks.' },
   { key: 'app_revenue', compare: 'app_revenue', title: 'App Revenue', color: '#F5A524', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> what users pay the applications running on a chain — DEX fees, lending spreads, launchpad cuts — as opposed to what they pay the chain itself.<br><br><b>Why it matters:</b> read it against Network Revenue. That is the toll the network collects; this is the business built on top of it. A chain can carry cheap blockspace and still host enormous app businesses, and the ratio between the two is a fair read on where the value actually accrues. Source: DefiLlama.' },
-  { key: 'rev_share', compare: 'rev_share', title: 'Share of Cross-Chain Revenue', color: '#F97316', fmt: pct1, agg: 'mean',
+  { key: 'rev_share', compare: 'rev_share', noStack: true, /* percentages already summing to 100 */ title: 'Share of Cross-Chain Revenue', color: '#F97316', fmt: pct1, agg: 'mean',
     tip: '<b>In simple terms:</b> of every dollar users spent on blockspace across these ten chains that day, this is the slice each one captured.<br><br><b>Why it matters:</b> absolute revenue rises and falls with the whole market, so share shows who is actually winning demand. A chain gaining share is taking real paying activity from the others.' },
   { key: 'active_addresses', compare: 'active_addresses', title: 'Active Addresses', color: '#38BDF8', fmt: compact, agg: 'mean',
     tip: '<b>In simple terms:</b> how many distinct wallets transacted on each chain that day.<br><br><b>Why it matters:</b> the broadest measure of reach — how many people (and bots) actually show up. Read it next to REV: many addresses paying little means cheap, accessible activity; few addresses paying a lot means expensive blockspace.' },
-  { key: 'tx_per_address', compare: 'tx_per_address', title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
+  { key: 'tx_per_address', compare: 'tx_per_address', noStack: true, /* a ratio, not a count */ title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
     tip: '<b>In simple terms:</b> successful transactions divided by active wallets — how intensively the average wallet uses a chain each day.<br><br><b>Why it matters:</b> it separates chains people visit from chains people <i>use</i>. A high number means wallets transacting repeatedly, the pattern behind trading, payments and apps rather than one-off transfers. Automated traders lift this on the busiest chains.' },
   { key: 'ytd_transactions', compare: 'transactions', title: 'Transactions', color: '#38BDF8', fmt: compact, agg: 'sum' },
   // Average transactions per second: the bucket's MEAN daily count over 86,400.
@@ -1103,12 +1104,12 @@ const TRENDS = [
   { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply', color: '#E9469A', fmt: usd, agg: 'last' },
   { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',          color: '#4ADE80', fmt: usd, agg: 'last' },
   { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd, agg: 'sum' },
-  { key: 'fsr_card', compare: 'fsr', title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact, agg: 'mean',
+  { key: 'fsr_card', compare: 'fsr', noStack: true, /* a ratio */ title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact, agg: 'mean',
     tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are.<br><br><b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD.<br><br><b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.' },
-  { key: 'fee_median_card', compare: 'fee_median', title: 'Median Transaction Fee', color: '#EAB308',
+  { key: 'fee_median_card', compare: 'fee_median', noStack: true, /* medians do not add */ title: 'Median Transaction Fee', color: '#EAB308',
     fmt: feeUsd, agg: 'mean',
     tip: '<b>In simple terms:</b> what the middle transaction costs that day — half cost less, half cost more. The median is used rather than the average so a handful of enormous transactions cannot skew it.<br><br><b>Why it matters:</b> this is the number a normal user actually feels. Cheap, predictable fees are what let payments, gaming and high-frequency apps work at all.' },
-  { key: 'fee_vol_card', compare: 'fee_vol', title: 'Median Fee Volatility', color: '#EF4444',
+  { key: 'fee_vol_card', compare: 'fee_vol', noStack: true, /* a volatility measure */ title: 'Median Fee Volatility', color: '#EF4444',
     fmt: feeUsd, agg: 'mean',
     tip: '<b>In simple terms:</b> how much the median fee swings around — the 30-day rolling standard deviation of a chain&rsquo;s daily median fee, in dollars.<br><br><b>Why it matters:</b> a low fee is only useful if it stays low. High volatility means costs spike without warning, which is what makes budgeting for on-chain activity difficult.' },
 ];
@@ -1632,10 +1633,28 @@ function makeTrendCard(t) {
   const cutoff = range === '1d' ? null
     : ptdOnly ? periodStart(new Date().toISOString().slice(0, 10), period)
     : trendCutoff(range, orig.key);
+  // Bars instead of lines, on the cross-chain cards. A line chart answers "how
+  // did each chain move"; stacked bars answer "how big was the total, and who
+  // made it up" — which is the question most of these cards are really about,
+  // and how the upstream terminals draw the same metrics.
+  //
+  // Only additive metrics can stack. Dollars, transactions and supply add across
+  // chains; medians, ratios and percentages do not, and those cards carry
+  // noStack and keep their lines. Note this is not the same as the time
+  // aggregation: stablecoin supply takes the period's last value rather than
+  // summing it, but still adds across chains perfectly well.
+  // The toggle is offered only where a stack means something. Grouped bars for
+  // nine chains across ninety days are an unreadable thicket — tried it — and a
+  // line already answers the question those cards ask.
+  const canBar = !!cmp && !t.noStack;
+  const barMode = canBar && !!state.trendTypes[t.key];
+  const stacked = barMode;
   // Per-card scale; comparisons default to log (the chains span magnitudes).
   const scale = state.trendScales[t.key] || (cmp ? 'log' : 'lin');
   // Rebased series cross zero and go negative, which a log axis cannot plot.
-  const logScale = scale === 'log' && !t.rebase;
+  // Stacked bars can't either: the segments are summed, and a log axis makes
+  // the stack's height a meaningless shape.
+  const logScale = scale === 'log' && !t.rebase && !stacked;
   // A 7-period average of a single period has nothing to average.
   const smooth = !!state.trendSmooth[t.key] && range !== '1d' && !ptdOnly;
   const aggMode = t.agg || 'sum';
@@ -1658,6 +1677,7 @@ function makeTrendCard(t) {
                        : aggMode === 'sum' ? ' totals' : aggMode === 'mean' ? ' averages' : ', period end') : '')
                  + (t.rebase && period === 'd' ? ' · cumulative from window start' : '')
                  + (logScale ? ' · log scale' : '')
+                 + (barMode ? ' · stacked bars' : '')
                  + (smooth ? (period === 'd' ? ' · 7-day average' : ' · 7-period average') : '');
   el.innerHTML = `<div class="crow"><h3 style="display:flex;align-items:center">${t.title}${t.tip
         ? `<span class="uinfo" tabindex="0" role="button" aria-label="What is this metric?">?<span class="tipbox">${t.tip}</span></span>` : ''}</h3>
@@ -1672,6 +1692,12 @@ function makeTrendCard(t) {
         <select class="rsel" data-cscale-sel aria-label="Axis scale">
           <option value="lin"${logScale ? '' : ' selected'}>Linear</option>
           <option value="log"${logScale ? ' selected' : ''}>Log</option></select>
+        ${canBar ? `<button class="tgl" data-ctype aria-pressed="${barMode}"
+          title="${barMode ? 'Show as lines' : 'Show as bars'}"
+          aria-label="${barMode ? 'Show as lines' : 'Show as bars'}"><svg width="11" height="11"
+          viewBox="0 0 12 12" aria-hidden="true" style="fill:currentColor;vertical-align:-1px"
+          ><rect x="0" y="6" width="3" height="6" rx=".5"/><rect x="4.5" y="3" width="3" height="9" rx=".5"
+          /><rect x="9" y="1" width="3" height="11" rx=".5"/></svg></button>` : ''}
         ${t.noSmooth ? '' : `<span class="ctl-sep"></span>
         <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button>`}</span></div>
     ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
@@ -1701,6 +1727,11 @@ function makeTrendCard(t) {
   });
   el.querySelector('[data-cscale-sel]').addEventListener('change', e => {
     state.trendScales[t.key] = e.target.value;
+    const fresh = makeTrendCard(orig);
+    if (fresh) el.replaceWith(fresh);
+  });
+  el.querySelector('[data-ctype]')?.addEventListener('click', () => {
+    state.trendTypes[t.key] = !state.trendTypes[t.key];
     const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   });
@@ -1945,6 +1976,28 @@ function makeTrendCard(t) {
 
   const plotted = datasets.flatMap(ds => ds.data).map(p => p.x).sort();
   if (plotted.length) setNote(plotted[plotted.length - 1]);
+
+  if (barMode) {
+    // Same datasets, drawn as columns. borderColor carries each chain's colour
+    // on the line datasets, so it becomes the fill here.
+    const barSets = datasets.map(ds => ({
+      label: ds.label, data: ds.data, backgroundColor: ds.borderColor,
+      borderColor: ds.borderColor, borderWidth: 0, borderRadius: 1,
+      categoryPercentage: 0.98, barPercentage: 0.96,
+      hidden: ds.hidden,
+    }));
+    const opts = sparkOptions(t, unit, logScale);
+    opts.scales.x.stacked = stacked;
+    opts.scales.y.stacked = stacked;
+    // A stack is read as a total, so the axis has to start at zero even when
+    // every chain is far above it.
+    if (stacked) opts.scales.y.beginAtZero = true;
+    trendCharts[t.key] = new Chart(canvas, {
+      type: 'bar', data: { datasets: barSets }, options: opts,
+    });
+    return el;
+  }
+
   trendCharts[t.key] = new Chart(canvas, {
     type: 'line', data: { datasets }, options: sparkOptions(t, unit, logScale),
   });
