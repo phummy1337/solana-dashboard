@@ -1340,7 +1340,14 @@ function shareLayout(items, fmt) {
     if (Math.max(...txts.map(t => probe.measureText(t).width)) <= LEG_COL - LEG_SWATCH - 12) break;
   }
   const rowH = Math.min(24, Math.floor(chart.h / Math.max(ranked.length, 1)));
-  const x = SHARE_W - SHARE_PAD - LEG_COL;
+  // Give the legend only the width it uses. The column was a fixed 165px, so a
+  // one-chain export reserved a whole chain list's worth of empty space beside
+  // the plot; the chart takes back whatever is left over.
+  probe.font = `700 ${size}px Syne, sans-serif`;
+  const widest = Math.max(0, ...txts.map(t => probe.measureText(t).width));
+  const col = Math.min(LEG_COL, Math.ceil(widest) + LEG_SWATCH + 12);
+  chart.w = SHARE_W - SHARE_PAD * 2 - col - LEG_GUTTER;
+  const x = SHARE_W - SHARE_PAD - col;
   const laid = ranked.map((it, i) => ({
     txt: txts[i], color: it.color, x, y: chart.y + 13 + i * rowH,
   }));
@@ -1495,15 +1502,21 @@ function snapshotChart(chart, targetTickPx = 15, dpr = 4, box = null) {
   return snap;
 }
 
-async function buildTrendImage(key, title, fmt, el) {
+async function buildTrendImage(key, title, fmt, el, win) {
   const chart = trendCharts[key];
   if (!chart) return null;
   let items;
   if (chart.config.type === 'bar' && chart.data.datasets.length > 1) {
-    // grouped bars: one dataset per series, labelled by its latest value
+    // One dataset per series, labelled by its latest value. Two shapes reach
+    // here: the per-period bars hold plain numbers, the stacked cross-chain
+    // bars reuse the line datasets' {x, y} points. Unwrap before formatting —
+    // handing fmt() a point object printed every row as "(—)".
+    const latest = d => {
+      const v = [...d.data].reverse().find(p => p != null && (typeof p !== 'object' || p.y != null));
+      return v != null && typeof v === 'object' ? v.y : v;
+    };
     items = chart.data.datasets.filter(d => !d.hidden).map(d => ({
-      label: d.label, color: d.borderColor,
-      val: [...d.data].reverse().find(v => v != null) }));
+      label: d.label, color: d.borderColor, val: latest(d) }));
   } else if (chart.config.type === 'bar') {
     const ds = chart.data.datasets[0];
     items = chart.data.labels.map((l, i) => ({
@@ -1513,7 +1526,9 @@ async function buildTrendImage(key, title, fmt, el) {
     items = chart.data.datasets.filter(d => !d.hidden).map(d => ({
       label: d.label, color: d.borderColor, val: d.data[d.data.length - 1]?.y }));
   }
-  const note = el.querySelector('.note').textContent.trim();
+  // The window leads the note: it is the first thing you need to know about a
+  // card that has travelled away from the control that produced it.
+  const note = (win ? win + ' · ' : '') + el.querySelector('.note').textContent.trim();
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
   return buildShareImage(snapshotChart(chart, 15, 4, shareLayout(items, fmt).chart),
                          title, note, items, fmt);
@@ -1524,7 +1539,7 @@ async function downloadTrendImage(key, title, fmt, el, range) {
   // not on the image, so two exports of the same chart over different windows
   // arrived looking identical.
   const win = rangeTitle(range);
-  const cv = await buildTrendImage(key, title + (win ? ` — ${win}` : ''), fmt, el);
+  const cv = await buildTrendImage(key, title, fmt, el, win);
   if (cv) saveCanvas(cv, `state-of-solana-${key.replace(/_/g, '-')}-${range}.png`);
 }
 
