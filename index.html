@@ -1698,9 +1698,50 @@ function attachBrush(el, chart, key) {
     fromEl.textContent = fmtDate(iso(a));
     toEl.textContent = fmtDate(iso(b));
   };
+  /* Chart.js fits the y axis to every point in the dataset, not to the ones the
+     x window leaves visible — so brushing into a quiet stretch kept the axis
+     scaled for a peak that was no longer on screen, and brushing past a peak
+     clipped the bars flat against the top. Compute the range here instead.
+
+     Stacks are measured by column total rather than by the tallest single
+     series, which is what the axis actually has to fit. */
+  const fitY = () => {
+    const y = chart.options.scales.y;
+    if (full()) { y.min = undefined; y.max = undefined; return; }
+    const isStack = !!y.stacked;
+    const totals = new Map();
+    let lo = Infinity, hi = -Infinity;
+    chart.data.datasets.forEach((d, i) => {
+      if (!chart.isDatasetVisible(i)) return;
+      for (const pt of d.data || []) {
+        if (!pt || pt.y == null || !isFinite(pt.y)) continue;
+        const x = ms(pt.x);
+        if (!(x >= a && x <= b)) continue;
+        if (isStack) totals.set(x, (totals.get(x) || 0) + pt.y);
+        else { if (pt.y < lo) lo = pt.y; if (pt.y > hi) hi = pt.y; }
+      }
+    });
+    if (isStack) for (const v of totals.values()) {
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    if (!isFinite(hi) || !isFinite(lo)) { y.min = undefined; y.max = undefined; return; }
+    if (y.type === 'logarithmic') {
+      // No headroom here: logDecades already rounds the axis out to whole
+      // decades, and padding first pushed the max over a boundary — brushing in
+      // widened the axis from 10M to 100M instead of tightening it.
+      y.min = lo > 0 ? lo : undefined;
+      y.max = hi;
+    } else {
+      // beginAtZero already pins the floor unless the series goes negative.
+      y.min = lo < 0 ? lo * 1.08 : undefined;
+      y.max = hi > 0 ? hi * 1.08 : undefined;
+    }
+  };
   const apply = () => {
     chart.options.scales.x.min = full() ? undefined : a;
     chart.options.scales.x.max = full() ? undefined : b;
+    fitY();
     chart.update('none');
   };
   paint();
