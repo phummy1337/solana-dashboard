@@ -1224,7 +1224,14 @@ function sparkOptions(t, unit, logScale) {
     responsive: true, maintainAspectRatio: false, animation: false,
     interaction: { mode: 'index', intersect: false },
     scales: {
-      x: { type: 'time', time: { unit, tooltipFormat: 'MMM d, yyyy' }, grid: { display: false },
+      x: { type: 'time',
+           time: { unit, tooltipFormat: 'MMM d, yyyy',
+                   // MM/YY once the axis is counting months or longer. Day and
+                   // week ticks keep a date, since every tick in a month-long
+                   // window would otherwise read the same.
+                   displayFormats: { month: 'MM/yy', quarter: 'MM/yy', year: 'MM/yy',
+                                     day: 'MMM d', week: 'MMM d' } },
+           grid: { display: false },
            border: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 34, font: { size: 10 } } },
       y: { type: logScale ? 'logarithmic' : 'linear',
            grid: gridCfg, border: { display: false }, beginAtZero: !logScale,
@@ -1995,7 +2002,10 @@ function makeTrendCard(t) {
 
     const clip = pts => pts.filter(p => p.d >= cutoff);
     const spanDays = Math.max(1, (new Date(last.d) - new Date(cutoff)) / 86400000);
-    const unit = spanDays > 720 ? 'year' : spanDays > 120 ? 'month' : 'day';
+    // Month ticks all the way out, rather than dropping to bare years past two:
+    // a 2Y monthly chart was labelling twenty-four bars with a single "2026".
+    // autoSkip thins them, so a 5Y window still gets a readable handful.
+    const unit = spanDays > 120 ? 'month' : 'day';
 
     const prep = pts => {
       let out = aggregateSeries(pts, period, aggMode);
