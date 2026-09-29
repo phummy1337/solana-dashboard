@@ -242,14 +242,17 @@
   .brush[hidden] { display: none; }
   .btrack { position: relative; height: 22px; border-radius: 6px;
             background: rgba(143,165,212,.10); border: 1px solid rgba(143,165,212,.16); }
+  /* Periwinkle, not the site's orange: the brush sits under every card and the
+     orange read as a call to action on twenty charts at once. */
   .bsel { position: absolute; top: -1px; bottom: -1px; border-radius: 6px; cursor: grab;
-          background: rgba(249,115,22,.22); border: 1px solid rgba(249,115,22,.55); }
+          background: rgba(143,165,212,.16); border: 1px solid rgba(143,165,212,.42); }
   .bsel:active { cursor: grabbing; }
   /* Handles reach past the track so they stay grabbable on a narrow window. */
   .bh { position: absolute; top: -4px; bottom: -4px; width: 12px; cursor: ew-resize;
         display: flex; align-items: center; justify-content: center; }
+  /* The grips stay a touch brighter than the fill so they read as grabbable. */
   .bh::after { content: ''; width: 4px; height: 16px; border-radius: 3px;
-               background: #F97316; box-shadow: 0 0 0 1px rgba(3,8,21,.5); }
+               background: #A9BDE4; box-shadow: 0 0 0 1px rgba(3,8,21,.55); }
   .bh-l { left: -6px; } .bh-r { right: -6px; }
   .blabels { display: flex; justify-content: space-between; margin-top: 4px;
              font-size: 10px; color: var(--muted); }
