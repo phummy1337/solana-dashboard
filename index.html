@@ -1260,6 +1260,11 @@ function sparkOptions(t, unit, logScale) {
                  callbacks: {
                    label: c => ' ' + (c.dataset.label === t.title ? '' : c.dataset.label + '  ') + t.fmt(c.parsed.y),
                    labelPointStyle: () => ({ pointStyle: 'circle', rotation: 0 }),
+                   // Points are plotted at the start of their period, so the
+                   // default title would read "Sep 1" for a month whose data
+                   // runs to the 28th. Name the real date instead.
+                   title: c => c[0]?.raw?.xd ? fmtDate(c[0].raw.xd)
+                             : (c[0]?.label ?? ''),
                    // Name the running period rather than letting its short bar
                    // pass for a finished one.
                    afterTitle: c => c[0]?.raw?.ptd ? `${c[0].raw.ptd} · ${c[0].raw.n} of ${c[0].raw.of} days` : '',
@@ -1851,6 +1856,11 @@ function makeTrendCard(t) {
   // A 7-period average of a single period has nothing to average.
   const smooth = !!state.trendSmooth[t.key] && range !== '1d' && !ptdOnly;
   const aggMode = t.agg || 'sum';
+  // A bucket carries the last date that reported into it, which is where a
+  // monthly bar was being drawn — about a month to the right of the 09/26 tick
+  // that labels it. Plot the bucket at the start of its period so bar and tick
+  // line up; `xd` keeps the real date for the note and the tooltip.
+  const plotX = d => period === 'd' ? d : periodStart(d, period);
   // Trailing 7-day mean, computed on the full series BEFORE range clipping so
   // the first visible points still average over real history.
   const ma7 = pts => pts.map((p, i) => {
@@ -2047,7 +2057,8 @@ function makeTrendCard(t) {
         // Dropping non-positives keeps a log axis valid, but rebased series
         // legitimately sit at or below zero — never filter those.
         const data = prep(cmp[c.key]).filter(p => t.rebase || p.v > 0)
-          .map(p => ({ x: p.d, y: p.v, k: p.key, ptd: p.ptd, n: p.n, of: p.of }));
+          .map(p => ({ x: plotX(p.d), xd: p.d, y: p.v, k: p.key,
+                       ptd: p.ptd, n: p.n, of: p.of }));
         return {
           label: c.name, data, ...ptdLine(data),
           borderColor: c.color, borderWidth: c.width, order: c.key === 'solana' ? 10 : 1,
@@ -2079,7 +2090,8 @@ function makeTrendCard(t) {
         if (fresh) el.replaceWith(fresh);
       }));
     } else {
-      const data = prep(solPts).map(p => ({ x: p.d, y: p.v, k: p.key, ptd: p.ptd, n: p.n, of: p.of }));
+      const data = prep(solPts).map(p => ({ x: plotX(p.d), xd: p.d, y: p.v, k: p.key,
+                                           ptd: p.ptd, n: p.n, of: p.of }));
       datasets = [{
         label: t.title, data, ...ptdLine(data), pointBackgroundColor: t.color,
         borderColor: t.color, borderWidth: 1.6, pointHoverRadius: 3, tension: 0.25, fill: true,
@@ -2108,7 +2120,7 @@ function makeTrendCard(t) {
   // one-point line.
   const periodKeys = [...new Set(datasets.flatMap(ds => ds.data.map(p => p.k)))];
   if (period !== 'd' && periodKeys.length === 1 && datasets.length) {
-    const dates = datasets.flatMap(ds => ds.data.map(p => p.x)).sort();
+    const dates = datasets.flatMap(ds => ds.data.map(p => p.xd || p.x)).sort();
     setNote(dates[dates.length - 1]);
     return renderBars(datasets.map(ds => ({
       name: ds.label === t.title ? 'Solana' : ds.label,
@@ -2179,7 +2191,7 @@ function makeTrendCard(t) {
     return el;
   }
 
-  const plotted = datasets.flatMap(ds => ds.data).map(p => p.x).sort();
+  const plotted = datasets.flatMap(ds => ds.data).map(p => p.xd || p.x).sort();
   if (plotted.length) setNote(plotted[plotted.length - 1]);
 
   if (barMode) {
