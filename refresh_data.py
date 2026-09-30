@@ -1394,6 +1394,15 @@ def main() -> int:
         bf_path = Path(__file__).resolve().parent / "local" / "blockworks_backfill.json"
         if bf_path.exists():
             bf = json.loads(bf_path.read_text())
+            # Two shapes: the original file was compare blocks at the top level;
+            # it may now also carry a "series" section, since the Solana-only
+            # series are fetched separately and would otherwise sit a day behind
+            # the comparison cards built from the same export.
+            series_bf = {}
+            if "compare" in bf or "series" in bf:
+                series_bf = bf.get("series") or {}
+                bf = bf.get("compare") or {}
+
             for block, chains in bf.items():
                 cur = compare.get(block) or {}
                 if not cur:
@@ -1411,6 +1420,35 @@ def main() -> int:
                 compare[block] = cur
                 newest = max((pts[-1]["d"] for pts in cur.values() if pts), default="?")
                 print(f"  backfill {block}: {added} points merged, now through {newest}")
+
+            for key, points in series_bf.items():
+                cur = data["series"].get(key)
+                if not cur:
+                    continue
+                by_date = {p["d"]: p["v"] for p in cur}
+                added = 0
+                for d0, v in points.items():
+                    if since <= d0 < today_utc:
+                        by_date[d0] = v
+                        added += 1
+                data["series"][key] = [{"d": d, "v": by_date[d]} for d in sorted(by_date)]
+                print(f"  backfill series {key}: {added} points merged, "
+                      f"now through {max(by_date)}")
+
+            # Stats summed from a series have to be recomputed, or the tiles
+            # keep quoting a total that no longer matches the chart beside them.
+            ytd = [p for p in (data["series"].get("ytd_transactions") or [])
+                   if p["d"] >= YTD_START.isoformat()]
+            if "ytd_transactions" in series_bf and ytd:
+                stats["ytd_transactions"] = sum(p["v"] for p in ytd)
+                days = len({p["d"] for p in ytd})
+                if days:
+                    stats["avg_tps_ytd"] = stats["ytd_transactions"] / (days * 86400)
+                if stats.get("ytd_fees_usd"):
+                    stats["avg_fee_ytd"] = stats["ytd_fees_usd"] / stats["ytd_transactions"]
+                print(f"  backfill recomputed YTD transactions: "
+                      f"{stats['ytd_transactions']:,.0f} over {days} days "
+                      f"(avg TPS {stats.get('avg_tps_ytd', 0):,.0f})")
     except Exception as e:  # noqa: BLE001 - a bad backfill must not stop the run
         warn(f"blockworks backfill: {e}")
 
