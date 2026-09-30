@@ -36,7 +36,12 @@ jobs:
           while page <= 40:
               url = ("https://api.blockworks.com/v1/metrics?"
                      + urllib.parse.urlencode({"page": page, "limit": 100}))
-              req = urllib.request.Request(url, headers={"x-api-key": key})
+              # The edge in front of the API answers 403 to the default
+              # python-urllib agent -- refresh_data.py carries the same note.
+              req = urllib.request.Request(url, headers={
+                  "x-api-key": key,
+                  "User-Agent": "solana-dashboard/1.0 (+metrics-catalogue)",
+              })
               raw = json.load(urllib.request.urlopen(req, timeout=60))
               batch = raw if isinstance(raw, list) else (
                       raw.get("data") or raw.get("metrics") or raw.get("results") or [])
