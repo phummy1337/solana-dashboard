@@ -25,26 +25,40 @@ jobs:
           BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
           MATCH: ${{ github.event.inputs.match }}
         run: |
-          curl -fsS -H "x-api-key: $BLOCKWORKS_API_KEY" \
-            https://api.blockworks.com/v1/metrics -o metrics.json
           python3 - <<'PY'
-          import json, os, re
+          import json, os, urllib.request, urllib.parse
+
+          key = os.environ["BLOCKWORKS_API_KEY"]
           want = os.environ["MATCH"].lower()
-          raw = json.load(open("metrics.json"))
-          rows = raw if isinstance(raw, list) else (
-                 raw.get("data") or raw.get("metrics") or raw.get("results") or [])
+
+          # The catalogue pages at 100; walk it rather than judging from page one.
+          rows, page = [], 1
+          while page <= 40:
+              url = ("https://api.blockworks.com/v1/metrics?"
+                     + urllib.parse.urlencode({"page": page, "limit": 100}))
+              req = urllib.request.Request(url, headers={"x-api-key": key})
+              raw = json.load(urllib.request.urlopen(req, timeout=60))
+              batch = raw if isinstance(raw, list) else (
+                      raw.get("data") or raw.get("metrics") or raw.get("results") or [])
+              if not batch:
+                  break
+              rows += batch
+              if len(batch) < 100:
+                  break
+              page += 1
+
           print(f"catalogue holds {len(rows)} metrics; matching {want!r}\n")
           hits = 0
           for m in rows:
               if not isinstance(m, dict):
                   continue
-              slug = m.get("slug") or m.get("id") or m.get("name") or ""
-              title = m.get("title") or m.get("label") or m.get("description") or ""
-              if want in f"{slug} {title}".lower():
+              # `identifier` is the slug the /v1/metrics/{slug} calls take.
+              slug = m.get("identifier") or m.get("slug") or ""
+              title = m.get("name") or ""
+              desc = m.get("description") or ""
+              proj = m.get("project") or ""
+              if want in f"{slug} {title} {desc} {proj}".lower():
                   hits += 1
-                  print(f"  {slug:<44} {str(title)[:80]}")
+                  print(f"  {slug:<46} {str(title)[:70]}")
           print(f"\n{hits} match(es)")
-          if not hits and rows:
-              # Shape can drift; show the keys so the next run can be aimed.
-              print("sample keys:", sorted(rows[0].keys())[:14])
           PY
