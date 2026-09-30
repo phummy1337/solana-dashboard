@@ -1,0 +1,50 @@
+name: List Blockworks metrics
+
+# Looks up metric slugs by keyword. Adding a Blockworks-backed card means
+# knowing what the series is called, and the catalogue is behind the API key,
+# which lives here rather than on anyone's laptop.
+#
+# Prints slugs and titles only, never values: this repository is public, so its
+# Actions logs are public too, and the data itself is licensed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      match:
+        description: "Case-insensitive substring to match against slug or title"
+        type: string
+        required: true
+        default: "meme"
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Search the catalogue
+        env:
+          BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
+          MATCH: ${{ github.event.inputs.match }}
+        run: |
+          curl -fsS -H "x-api-key: $BLOCKWORKS_API_KEY" \
+            https://api.blockworks.com/v1/metrics -o metrics.json
+          python3 - <<'PY'
+          import json, os, re
+          want = os.environ["MATCH"].lower()
+          raw = json.load(open("metrics.json"))
+          rows = raw if isinstance(raw, list) else (
+                 raw.get("data") or raw.get("metrics") or raw.get("results") or [])
+          print(f"catalogue holds {len(rows)} metrics; matching {want!r}\n")
+          hits = 0
+          for m in rows:
+              if not isinstance(m, dict):
+                  continue
+              slug = m.get("slug") or m.get("id") or m.get("name") or ""
+              title = m.get("title") or m.get("label") or m.get("description") or ""
+              if want in f"{slug} {title}".lower():
+                  hits += 1
+                  print(f"  {slug:<44} {str(title)[:80]}")
+          print(f"\n{hits} match(es)")
+          if not hits and rows:
+              # Shape can drift; show the keys so the next run can be aimed.
+              print("sample keys:", sorted(rows[0].keys())[:14])
+          PY

@@ -87,12 +87,25 @@ jobs:
               if isinstance(b, dict) and "last" in b and "chains" in b:
                   print(f'  {f} -> {b["last"]} ({len(b["chains"])} chains)')
               elif isinstance(b, dict):
+                  # The backfill may nest its blocks under compare/series, or be
+                  # bare compare blocks. Unwrap so a block is never described as
+                  # if "compare" were a chain name.
+                  sections = ([("compare", b.get("compare") or {}),
+                               ("series", b.get("series") or {})]
+                              if ("compare" in b or "series" in b) else [("", b)])
                   parts = []
-                  for block, chains in b.items():
-                      if isinstance(chains, dict):
-                          days = {d for s in chains.values() if isinstance(s, dict) for d in s}
-                          parts.append(f"{block} ({len(chains)} chains"
-                                       + (f", through {max(days)}" if days else "") + ")")
+                  for label, blocks in sections:
+                      for block, inner in (blocks or {}).items():
+                          if not isinstance(inner, dict):
+                              continue
+                          # compare: {chain: {date: v}}   series: {date: v}
+                          nested = all(isinstance(v, dict) for v in inner.values()) and inner
+                          days = ({d for s in inner.values() for d in s} if nested
+                                  else set(inner))
+                          name = f"{label}.{block}" if label else block
+                          parts.append(f"{name} ({len(inner)} chains, " if nested
+                                       else f"{name} (")
+                          parts[-1] += (f"through {max(days)})" if days else "no dates)")
                   print(f'  {f} -> ' + (", ".join(parts) or "no recognised blocks"))
               else:
                   print(f"  {f} -> {type(b).__name__}")

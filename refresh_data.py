@@ -1437,11 +1437,14 @@ def main() -> int:
 
             # Stats summed from a series have to be recomputed, or the tiles
             # keep quoting a total that no longer matches the chart beside them.
-            ytd = [p for p in (data["series"].get("ytd_transactions") or [])
-                   if p["d"] >= YTD_START.isoformat()]
-            if "ytd_transactions" in series_bf and ytd:
-                stats["ytd_transactions"] = sum(p["v"] for p in ytd)
-                days = len({p["d"] for p in ytd})
+            # Not `ytd` -- that is a function called earlier in this same scope,
+            # and binding the name here made it local for the whole function,
+            # breaking the earlier call with an UnboundLocalError.
+            ytd_pts = [p for p in (data["series"].get("ytd_transactions") or [])
+                       if p["d"] >= YTD_START.isoformat()]
+            if "ytd_transactions" in series_bf and ytd_pts:
+                stats["ytd_transactions"] = sum(p["v"] for p in ytd_pts)
+                days = len({p["d"] for p in ytd_pts})
                 if days:
                     stats["avg_tps_ytd"] = stats["ytd_transactions"] / (days * 86400)
                 if stats.get("ytd_fees_usd"):
