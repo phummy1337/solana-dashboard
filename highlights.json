@@ -134,6 +134,84 @@
           "u": "https://cryptobriefing.com/goldman-sachs-88m-solana-etfs/"
         }
       ]
+    },
+    "2026-09": {
+      "note": "A month of absolute growth and relative compression: revenue, volume, addresses and TVL all up double digits, while SOL's rank among the majors and its share of DEX volume both slipped.",
+      "items": [
+        {
+          "d": "2026-09-09",
+          "cat": "Protocol",
+          "t": "Transaction V1 raises the size ceiling",
+          "card": "Transaction V1 ships",
+          "b": "The maximum transaction size went from 1,232 to 4,096 bytes, roughly tripling the room for bundled instructions, paired with a rent cut to 5,080 lamports per byte and cheaper program deployment. It unblocks the complex DeFi and institutional instructions that were hitting the old ceiling. Announced on the 9th; mainnet activation landed mid-month."
+        },
+        {
+          "d": "2026-09-09",
+          "cat": "Onchain",
+          "t": "A single-day record for new tokens",
+          "b": "263,151 new SPL tokens were minted in one day, against prior memecoin-cycle peaks nearer 40-50k. Launchpads accounted for a minority of the total, around 40k. A record worth reading with care: token mints measure activity, not value, and the same month drew criticism that app fees were concentrated in speculative launchpads."
+        },
+        {
+          "d": "2026-09-17",
+          "cat": "Real assets",
+          "t": "The SEC clears a path for tokenized stocks",
+          "card": "SEC clears tokenized stocks",
+          "b": "An Innovation Exemption granted five-year conditional relief: tokenized securities venues exempted from the exchange definition, and AMM liquidity providers from the dealer definition, for trading tokenized US stocks within symbol and volume limits. Solana already hosted a large share of tokenized-equity volume, so the order landed on an ecosystem positioned to use it."
+        },
+        {
+          "d": "2026-09-18",
+          "cat": "Protocol",
+          "t": "Slot times reach 250ms",
+          "card": "Slot times reach 250ms",
+          "b": "Epoch 1037 cut mainnet slot time from 300ms to 250ms under SIMD-0525, the fourth step of a staged reduction from 400ms toward 200ms, and the second cut in two months. Faster slots raise theoretical throughput and validator processing load together."
+        },
+        {
+          "d": "2026-09-23",
+          "cat": "Real assets",
+          "t": "Tokenized-stock holders pass one million",
+          "b": "Cumulative tokenized-stock holders crossed 1,000,000, and Solana's RWA ecosystem value printed a reported all-time high around $4.6B on RWA.xyz, with some trackers citing $4.49B. Our own RWA card reads $2.57B because DefiLlama's active market cap counts a narrower set than RWA.xyz does — the two are not comparable, and the card uses DefiLlama throughout."
+        },
+        {
+          "d": "2026-09-25",
+          "cat": "Onchain",
+          "t": "Stablecoin supply hits an all-time high",
+          "card": "Stablecoins hit $17.5B",
+          "b": "Stablecoin supply on Solana reached $17.51B, an all-time high, up from roughly $16.5B three days earlier. Trackers disagree slightly at the margin — Solana's own account cited $17.3B and DefiLlama $17.63B the same day — and the figure here is the one the dashboard carries."
+        },
+        {
+          "d": "2026-09-25",
+          "cat": "Protocol",
+          "t": "Alpenglow lands on testnet, not mainnet",
+          "card": "Alpenglow lands on testnet",
+          "b": "SIMD-0326 activated on testnet on the 24th and devnet on the 25th, retiring TowerBFT for Votor, targeting 100-150ms finality against 12.8s today. By the 30th testnet median finalization was reported at 54ms, inside the target. Mainnet stayed on TowerBFT pending an observation period, and only Agave supported it in September — Firedancer did not. Worth noting Alpenglow removes vote transactions from blocks, so reported TPS will fall once it ships even as settlement gets faster."
+        },
+        {
+          "d": "2026-09-25",
+          "cat": "Capital",
+          "t": "A record week for spot SOL ETFs",
+          "card": "Record week for SOL ETFs",
+          "b": "The week to the 25th drew $181-188M depending on the tracker, the strongest since launch, with a single-day record near $87M on the 25th and BSOL taking the majority. ETFs overtook XRP in net assets at $1.93B on the 28th. The month was not a straight line: the week to 4 September pulled in roughly $6M, down 96% from the week before."
+        },
+        {
+          "d": "2026-09-30",
+          "cat": "Payments",
+          "t": "Open USD launches natively on Solana",
+          "card": "Open USD launches",
+          "b": "OUSD went live as a Token-2022 mint, redeemable 1:1 for dollars at no cost to businesses, issued via Bridge with reserves at BlackRock, Lead Bank and BNY. Coinbase, Mastercard, Shopify, Stripe and Visa committed more than $1B of liquidity between them."
+        },
+        {
+          "d": "2026-09-14",
+          "cat": "Network",
+          "t": "A sampled failure rate puts bot traffic in the frame",
+          "b": "A 36-block sample showed a 33.2% non-vote failure rate, with bot accounts failing 58% of the time against 6% for human ones. No outage, and a sample rather than a census — but it is the clearest version of the quality-of-activity critique that ran alongside the month's throughput records."
+        },
+        {
+          "d": "2026-09",
+          "cat": "DeFi",
+          "t": "Spot DEX volume up a fifth, share down a third",
+          "b": "Solana settled $78.3B of spot DEX volume, up 20.0% on August, while its share of tracked volume fell from 43% to 29% — the rest of the market grew faster. Cumulative DEX volume crossed $3 trillion mid-month."
+        }
+      ]
     }
   }
 }
