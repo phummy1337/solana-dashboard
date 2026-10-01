@@ -590,6 +590,7 @@
           <option value="custom">Custom</option>
         </select>
         <input type="date" class="rsel dsel" id="priceFrom" aria-label="Start date" style="display:none">
+        <input type="date" class="rsel dsel" id="priceTo" aria-label="End date" style="display:none">
       </span>
       <span class="ctl-group">
         <span class="ctl-label">Interval</span>
@@ -864,7 +865,7 @@ async function rpc(method, params = [], attempt = 0) {
 const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply: null, inflation: null,
                 mode: 'daily', stats: {}, daily: {}, year: new Date().getUTCFullYear(),
                 rainbow: true, preRainbowScale: 'linear',
-                agg: 'w', from: null, levered: false, dfdv: null,
+                agg: 'w', from: null, to: null, levered: false, dfdv: null,
                 preLeverAgg: 'w', preLeverScale: 'logarithmic',
                 trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
                 trendHidden: {}, trendAggs: {}, trendFrom: {}, trendSeries: {}, trendCompare: {},
@@ -1615,6 +1616,16 @@ const RANGE_TITLES = { qtd: 'Quarter to Date', ytd: 'Year to Date', '1d': 'Lates
                        '1w': 'Past Week', '1m': 'Past Month', '3m': 'Past 3 Months',
                        '6m': 'Past 6 Months', '1y': 'Past Year', '2y': 'Past 2 Years',
                        '5y': 'Past 5 Years', custom: 'Custom Range' };
+/* A custom window should name its dates on the image: "Custom Range" tells a
+   reader nothing, and the whole point of writing the range onto an export is
+   that the card travels without the control that produced it. */
+function priceWindowTitle() {
+  if (state.range !== 'custom') return rangeTitle(state.range);
+  const a = state.from, b = state.to;
+  if (!a && !b) return RANGE_TITLES.custom;
+  if (a && b) return `${fmtDate(a)} – ${fmtDate(b)}`;
+  return a ? `From ${fmtDate(a)}` : `To ${fmtDate(b)}`;
+}
 function rangeTitle(range) {
   if (range === '30') return RANGE_TITLES['1m'];
   if (range === '90') return RANGE_TITLES['3m'];
@@ -1650,7 +1661,7 @@ async function downloadPriceImage() {
     }
     // "Since the SOL Bottom" already names its own window, so it is left alone;
     // every other range gets the window appended.
-    const win = rangeTitle(state.range);
+    const win = priceWindowTitle();
     const title = priceChart.$atBottom
       ? 'Since the SOL Bottom: DFDV vs. SOL'
       : 'DFDV vs. SOL' + (win ? ` — ${win}` : '');
@@ -1663,7 +1674,10 @@ async function downloadPriceImage() {
     return;
   }
   const sel = $('priceRange');
-  const rangeLabel = sel.options[sel.selectedIndex]?.text || '';
+  // "Custom" on its own says nothing on an exported card; name the dates.
+  const rangeLabel = state.range === 'custom'
+    ? priceWindowTitle()
+    : (sel.options[sel.selectedIndex]?.text || '');
   let note = `${rangeLabel} · ${state.scale === 'logarithmic' ? 'log' : 'linear'} scale`;
   let items = [{ label: 'SOL', color: [CANDLE_UP, CANDLE_DOWN], val: last.y }];
   if (state.rainbow) {
@@ -2350,6 +2364,7 @@ function drawPrice() {
     pts = pts.filter(p => p.x >= start);
   } else if (state.range === 'custom') {
     if (state.from) pts = pts.filter(p => p.x >= state.from);
+    if (state.to) pts = pts.filter(p => p.x <= state.to);
   } else if (state.range !== 'all') {
     const cutoff = new Date(Date.now() - Number(state.range) * 86400000).toISOString().slice(0, 10);
     pts = pts.filter(p => p.x >= cutoff);
@@ -2463,14 +2478,18 @@ function drawLevered() {
   else if (state.range !== 'all')
     anchor = floor(new Date(Date.now() - Number(state.range) * 86400000)
       .toISOString().slice(0, 10));
-  const dfdvPts = allDfdv.filter(p => p.x >= anchor);
+  const dfdvPts = allDfdv.filter(p => p.x >= anchor &&
+    !(state.range === 'custom' && state.to && p.x > state.to));
   // End on the last date both sides actually have a value for. SOL runs on a
   // live quote and DFDV on the last trade, so whichever is behind sets the
   // date — otherwise one side's move gets scored against the other's stale
   // print, and today drops out entirely whenever only one of them has it.
   const lastSol = state.priceSeries[state.priceSeries.length - 1]?.x || '0000';
   const lastDfdv = allDfdv[allDfdv.length - 1]?.x || '0000';
-  const through = lastSol < lastDfdv ? lastSol : lastDfdv;
+  let through = lastSol < lastDfdv ? lastSol : lastDfdv;
+  // A custom end date is a deliberate choice, so it wins over the feeds' own
+  // frontier -- but never extends past it, or the rebase runs off the data.
+  if (state.range === 'custom' && state.to && state.to < through) through = state.to;
   const solPts = state.priceSeries.filter(p => p.x >= anchor && p.x <= through);
   // Base off the anchor date itself, not the first weekly close, or the two
   // lines start from different days and neither begins at zero.
@@ -2545,17 +2564,20 @@ function drawLevered() {
     (verdict ? `<span class="leg lev-note"><span class="v num">${verdict}` +
             ` · ${AGG_LABEL[state.agg]} from ${fmtDate(anchor)}` +
             `${atBottom ? ", SOL's 2026 bottom" : ''}` +
-            ` · ${fmtDate(through)}` +
+            // "from X to Y" rather than "from X · Y": with an end date now
+            // selectable, a bare second date read as another aside.
+            ` to ${fmtDate(through)}` +
             `${src.intraday && through === lastDfdv ? ' (intraday)' : ''}` +
             `</span></span>` : '');
 }
 
 const maxDate = (a, b) => (b && b > a ? b : a);
 
-/* Only the custom start date hides itself; every control stays live in levered
-   mode, where the range re-anchors and the interval resamples. */
+/* Only the custom date pickers hide themselves; every control stays live in
+   levered mode, where the range re-anchors and the interval resamples. */
 function syncPriceControls() {
-  $('priceFrom').style.display = state.range === 'custom' ? '' : 'none';
+  for (const id of ['priceFrom', 'priceTo'])
+    $(id).style.display = state.range === 'custom' ? '' : 'none';
 }
 
 /* ------------------------------------------------------------ live network */
@@ -2731,13 +2753,22 @@ async function loadSupply() {
 /* -------------------------------------------------------------- controls */
 $('priceRange').addEventListener('change', e => {
   state.range = e.target.value;
-  if (state.range === 'custom' && !state.from) {
-    // seed the picker with the earliest date there is data for
+  if (state.range === 'custom') {
+    // seed the pickers with the span there is data for, and bound both to it
     const first = state.priceSeries[0]?.x;
-    state.from = $('priceFrom').value || first || null;
-    if (state.from) $('priceFrom').value = state.from;
-    $('priceFrom').min = first || '';
-    $('priceFrom').max = state.priceSeries[state.priceSeries.length - 1]?.x || '';
+    const last = state.priceSeries[state.priceSeries.length - 1]?.x;
+    if (!state.from) {
+      state.from = $('priceFrom').value || first || null;
+      if (state.from) $('priceFrom').value = state.from;
+    }
+    if (!state.to) {
+      state.to = $('priceTo').value || last || null;
+      if (state.to) $('priceTo').value = state.to;
+    }
+    for (const id of ['priceFrom', 'priceTo']) {
+      $(id).min = first || '';
+      $(id).max = last || '';
+    }
   }
   syncPriceControls();
   drawPrice();
@@ -2745,6 +2776,21 @@ $('priceRange').addEventListener('change', e => {
 });
 $('priceFrom').addEventListener('change', e => {
   state.from = e.target.value || null;
+  // A start after the end would filter everything out and draw a blank card;
+  // push the other end along instead of silently rendering nothing.
+  if (state.from && state.to && state.from > state.to) {
+    state.to = state.from;
+    $('priceTo').value = state.to;
+  }
+  drawPrice();
+  syncPriceUrl();
+});
+$('priceTo').addEventListener('change', e => {
+  state.to = e.target.value || null;
+  if (state.from && state.to && state.to < state.from) {
+    state.from = state.to;
+    $('priceFrom').value = state.from;
+  }
   drawPrice();
   syncPriceUrl();
 });
@@ -2829,6 +2875,7 @@ function priceHash() {
   // A custom range is meaningless without its start date, so they travel
   // together or not at all.
   if (state.range === 'custom' && state.from) p.set('from', state.from);
+  if (state.range === 'custom' && state.to) p.set('to', state.to);
   if (!state.levered) {        // levered dictates both; recording them would
                                // go stale the moment it is switched back off
     if (state.agg !== PRICE_DEFAULTS.agg) p.set('agg', state.agg);
@@ -2871,6 +2918,11 @@ function applyPriceHash(hash = location.hash) {
     if (range === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(from || '')) {
       state.from = from;
       $('priceFrom').value = from;
+    }
+    const to = p.get('to');
+    if (range === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(to || '')) {
+      state.to = to;
+      $('priceTo').value = to;
     }
   }
   const rainbow = p.get('rainbow');
