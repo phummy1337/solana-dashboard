@@ -1163,6 +1163,9 @@ def main() -> int:
         ("BNB", "binancecoin"), ("Avalanche", "avalanche-2"), ("Sui", "sui"),
         ("Tron", "tron"), ("Polygon", "polygon-ecosystem-token"),
         ("Arbitrum", "arbitrum"), ("Hyperliquid", "hyperliquid"),
+        # Not chains we compare on-chain activity for, but they belong in any
+        # honest "majors" price comparison: both sit top-12 by market cap.
+        ("XRP", "ripple"), ("Dogecoin", "dogecoin"),
     ]
     perf: dict = {}
     for i, (label, cg_id) in enumerate(PRICE_ASSETS):

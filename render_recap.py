@@ -194,8 +194,17 @@ def main() -> int:
         vals = [p["v"] for p in pts if p["d"][:7] == m]
         return vals[-1] if vals else None
 
+    # The price panel ranks SOL against the majors -- the largest assets by
+    # market cap, stablecoins aside -- rather than against the chain peer set
+    # the rest of the card uses. Avalanche, Sui, Polygon and Arbitrum are the
+    # right comparison for throughput and fees; they are not what "majors"
+    # means to anyone reading a monthly return.
+    MAJORS = {"Bitcoin", "Ethereum", "BNB", "XRP", "Solana", "Tron",
+              "Dogecoin", "Hyperliquid"}
     perf = {}
     for asset, pts in cmp_.get("price_perf", {}).items():
+        if asset not in MAJORS:
+            continue
         a, b = last_in(pts, prev), last_in(pts, ym)
         if a and b:
             perf[asset] = (b / a - 1) * 100
@@ -229,7 +238,9 @@ def main() -> int:
 
     tx = month_total("transactions")
     sol_tx, other_tx = tx.get("solana", 0), sum(v for c, v in tx.items() if c != "solana")
-    rev = month_total("rev")
+    # App revenue, not REV: it is the wider measure of what the ecosystem earns,
+    # and Solana leads every chain on it rather than placing second.
+    rev = month_total("app_revenue")
     rev_rank = sorted(rev.items(), key=lambda kv: -kv[1])
     rev_total = sum(rev.values()) or 1
     dex = month_total("dex_volume")
@@ -300,7 +311,7 @@ def main() -> int:
 
     # ------------------------- 1. SOL vs peers: the month's return, ranked
     py, ph = PY_ + DH_, PH_
-    panel(PAD, py, W - PAD * 2, ph, f"{MONTHS[mon - 1]} price performance vs peers")
+    panel(PAD, py, W - PAD * 2, ph, f"{MONTHS[mon - 1]} price performance vs majors")
     if sol_ret is not None:
         up = sol_ret >= 0
         rank = [a for a, _ in perf_rank].index("Solana") + 1
@@ -309,7 +320,9 @@ def main() -> int:
         if sol_open and sol_close:
             col.append((f"${sol_open:,.2f} → ${sol_close:,.2f}", f_num(19 * S, 600),
                         (211, 219, 234), 30))
-        col.append((f"{ordinal(rank)} best of {len(perf_rank)} majors", f_syne(16 * S, 700),
+        # "1st best of 8" reads badly; first place just says so.
+        placing = ("best of" if rank == 1 else f"{ordinal(rank)} best of")
+        col.append((f"{placing} {len(perf_rank)} majors", f_syne(16 * S, 700),
                     MINT if rank <= 3 else MUTE, 0))
         ty = py + 40 + (ph - 40 - (sum(a for *_, a in col) + 21)) / 2
         for s, f, c, adv in col:
@@ -375,7 +388,7 @@ def main() -> int:
              f_syne(16 * S, 700), MINT)
 
     x2 = PAD + hw + GAP
-    panel(x2, ry, hw, rh, "Real economic value")
+    panel(x2, ry, hw, rh, "App revenue")
     top_rev = rev_rank[:4]
     other_rev = sum(v for _, v in rev_rank[4:])
     rows = [(CHAIN_LABEL.get(ch, ch), v, ch == "solana", CHAIN_COLOR.get(ch, SLATE))
@@ -451,10 +464,10 @@ def main() -> int:
         ("Real economic value", compact(agg("rev", "sum"), "$"), mom("rev", "sum"), False),
         ("Active addresses /day", compact(agg("active_addresses", "mean")),
          mom("active_addresses", "mean"), False),
-        ("Transactions /second", f"{(agg('transactions', 'mean') or 0) / 86400:,.0f}",
-         mom("transactions", "mean"), False),
-        ("Median fee", (lambda v: "—" if v is None else f"${v:.5f}")(agg("fee_median", "mean")),
-         mom("fee_median", "mean"), True),
+        ("Perps volume", compact(agg("perps_volume", "sum"), "$"),
+         mom("perps_volume", "sum"), False),
+        ("Tokenized equity vol", compact(agg("tokenized_equity_volume", "sum"), "$"),
+         mom("tokenized_equity_volume", "sum"), False),
         ("DeFi TVL", compact(agg("defi_tvl", "last"), "$"), mom("defi_tvl", "last"), False),
     ]
     sw = (W - PAD * 2 - 4 * 12) / 5

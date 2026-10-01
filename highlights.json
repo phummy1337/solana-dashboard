@@ -141,8 +141,8 @@
         {
           "d": "2026-09-09",
           "cat": "Protocol",
-          "t": "Transaction V1 raises the size ceiling",
-          "card": "Transaction V1 ships",
+          "t": "Transactions get three times the room",
+          "card": "Transactions get 3x bigger",
           "b": "The maximum transaction size went from 1,232 to 4,096 bytes, roughly tripling the room for bundled instructions, paired with a rent cut to 5,080 lamports per byte and cheaper program deployment. It unblocks the complex DeFi and institutional instructions that were hitting the old ceiling. Announced on the 9th; mainnet activation landed mid-month."
         },
         {
