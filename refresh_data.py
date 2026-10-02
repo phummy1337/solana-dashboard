@@ -253,18 +253,61 @@ def main() -> int:
         return out
 
     prices: dict[str, float] = {}
+    def yahoo_closes(stop_before: str) -> dict[str, float]:
+        """Daily SOL-USD closes before Coinbase listed it.
+
+        Coinbase has no SOL before 2021-06-17, and the carried history behind
+        that date came from Blockworks, which starts at 2020-09-09 — so the
+        monthly-returns table simply had no April-to-September 2020. Yahoo
+        carries SOL-USD from 2020-04-10, which is as far back as the pair
+        trades anywhere.
+
+        It is used for the whole pre-Coinbase era rather than only the missing
+        months, so that stretch comes from one source instead of two spliced at
+        a date where they disagree. Checked against the overlap: Yahoo tracks
+        Coinbase to a 0.19% median and the two agree to 0.04% on the join date
+        itself, while the carried Blockworks values differ from both by a 2.5%
+        median and up to 30% in the thin early markets.
+        """
+        start = int(datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp())
+        end = int(datetime.fromisoformat(stop_before)
+                  .replace(tzinfo=timezone.utc).timestamp())
+        j = get("https://query1.finance.yahoo.com/v8/finance/chart/SOL-USD"
+                f"?period1={start}&period2={end}&interval=1d")
+        r = (j.get("chart") or {}).get("result") or []
+        if not r:
+            raise RuntimeError("no chart result")
+        stamps = r[0].get("timestamp") or []
+        closes = ((r[0].get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+        out = {}
+        for t, c in zip(stamps, closes):
+            if c:
+                d0 = datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat()
+                if d0 < stop_before:
+                    out[d0] = float(c)
+        return out
+
     carried = {p["d"]: p["v"] for p in (prev_all.get("series") or {}).get("price") or []}
     try:
         cb = coinbase_closes(CB_START)
         if len(cb) < 500:
             raise RuntimeError(f"only {len(cb)} closes returned — looks truncated")
-        # Everything Coinbase covers comes from Coinbase; older dates keep the
-        # history already published. `update` order matters: Coinbase wins on
-        # any date both hold.
+        # Everything Coinbase covers comes from Coinbase. Before that, Yahoo if
+        # it answers, else the history already published. `update` order
+        # matters: later sources win on any date more than one holds.
         prices = {d: v for d, v in carried.items() if d < CB_START}
+        early = {}
+        try:
+            early = yahoo_closes(CB_START)
+            if len(early) < 300:
+                raise RuntimeError(f"only {len(early)} closes — looks truncated")
+        except Exception as e:  # noqa: BLE001 - the carried head still stands
+            warn(f"price series (Yahoo, pre-Coinbase): {e}")
+        prices.update(early)
         prices.update(cb)
-        print(f"  price series: {len(prices)} days (Coinbase from {CB_START}, "
-              f"through {max(prices)})")
+        print(f"  price series: {len(prices)} days (Coinbase from {CB_START}"
+              + (f", Yahoo {min(early)}-{max(early)}" if early else "")
+              + f", through {max(prices)})")
     except Exception as e:  # noqa: BLE001
         warn(f"price series (Coinbase): {e}")
 
