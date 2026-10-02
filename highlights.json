@@ -152,6 +152,12 @@
           "b": "263,151 new SPL tokens were minted in one day, against prior memecoin-cycle peaks nearer 40-50k. Launchpads accounted for a minority of the total, around 40k. A record worth reading with care: token mints measure activity, not value, and the same month drew criticism that app fees were concentrated in speculative launchpads."
         },
         {
+          "d": "2026-09-14",
+          "cat": "Network",
+          "t": "A sampled failure rate puts bot traffic in the frame",
+          "b": "A 36-block sample showed a 33.2% non-vote failure rate, with bot accounts failing 58% of the time against 6% for human ones. No outage, and a sample rather than a census — but it is the clearest version of the quality-of-activity critique that ran alongside the month's throughput records."
+        },
+        {
           "d": "2026-09-17",
           "cat": "Real assets",
           "t": "The SEC clears a path for tokenized stocks",
@@ -198,12 +204,6 @@
           "t": "Open USD launches natively on Solana",
           "card": "Open USD launches",
           "b": "OUSD went live as a Token-2022 mint, redeemable 1:1 for dollars at no cost to businesses, issued via Bridge with reserves at BlackRock, Lead Bank and BNY. Coinbase, Mastercard, Shopify, Stripe and Visa committed more than $1B of liquidity between them."
-        },
-        {
-          "d": "2026-09-14",
-          "cat": "Network",
-          "t": "A sampled failure rate puts bot traffic in the frame",
-          "b": "A 36-block sample showed a 33.2% non-vote failure rate, with bot accounts failing 58% of the time against 6% for human ones. No outage, and a sample rather than a census — but it is the clearest version of the quality-of-activity critique that ran alongside the month's throughput records."
         },
         {
           "d": "2026-09",

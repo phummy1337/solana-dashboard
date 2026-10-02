@@ -3406,7 +3406,16 @@ function renderHighlights(h) {
       n.textContent = rec.note;
       body.appendChild(n);
     }
-    for (const it of rec.items || []) {
+    // Date order, whatever order the file happens to list them in — entries get
+    // appended as a month is written up, and a late addition should not land
+    // out of sequence. Month-wide items ("All month") carry no day and sort to
+    // the end, since they summarise rather than date-stamp.
+    const dated = [...(rec.items || [])].sort((a, b) => {
+      const aw = a.d.length > 7, bw = b.d.length > 7;
+      if (aw !== bw) return aw ? -1 : 1;
+      return a.d < b.d ? -1 : a.d > b.d ? 1 : 0;
+    });
+    for (const it of dated) {
       const colour = cats[it.cat] || 'var(--peri)';
       const row = document.createElement('div');
       row.className = 'hl-row';
