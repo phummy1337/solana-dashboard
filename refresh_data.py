@@ -60,11 +60,6 @@ CHARTS = {
     "tokeq_vol":  (10634, "Solana: Tokenized Equities Volume by Token Issuer"),
     "tokeq_sup":  (10631, "Solana: Tokenized Equities Supply"),
     "tokeq_chain": (6874, "Spot DEXs: Tokenized Equities Volume by Blockchain"),
-    # One wide table serves both lending cards: 4545 ("Lending: Deposits") and
-    # 4547 ("Lending: Outstanding Loans") return the same rows, carrying
-    # chain_deposit_* and chain_borrow_* columns side by side. Fetching it once
-    # gives two cards for one call.
-    "lending":    (4545,  "Lending: Deposits and Outstanding Loans by chain"),
 }
 
 # Comparison sets for the Activity Trends charts: Solana vs major L1/L2s.
@@ -960,43 +955,6 @@ def main() -> int:
     # Tokenized-asset volume by blockchain (chart 6874). Equities-only isn't
     # broken out for most of the history, so approximate it as total tokenized
     # asset volume minus the commodities category where that's reported.
-    # ----------------------------------------------- lending, by chain
-    # Deposits and outstanding loans share one table, so they share one fetch.
-    # Columns appear only once a chain has data, so the chains are discovered
-    # from the rows rather than assumed — reading the first row alone would
-    # have missed every chain that arrived after 2021.
-    if not (bw_reuse("compare", "lending_deposits", "lending deposits")
-            and bw_reuse("compare", "lending_loans", "outstanding loans")):
-        try:
-            rows = chart_rows(CHARTS["lending"][0])
-            LEND_MAP = {"solana": "solana", "ethereum": "ethereum", "base": "base",
-                        "arbitrum": "arbitrum", "bnb": "bnb", "avalanche": "avalanche",
-                        "hyperevm": "hyperevm", "polygon": "polygon", "tron": "tron",
-                        "sui": "sui", "robinhood": "robinhood"}
-            for prefix, key, label in (("chain_deposit_", "lending_deposits", "lending deposits"),
-                                       ("chain_borrow_", "lending_loans", "outstanding loans")):
-                out: dict = {}
-                for r in rows:
-                    d0 = row_date(r)
-                    if not d0 or not (since <= d0 < today_utc):
-                        continue
-                    for col, v in r.items():
-                        if not col.startswith(prefix) or v is None:
-                            continue
-                        chain = LEND_MAP.get(col[len(prefix):])
-                        if chain:
-                            out.setdefault(chain, {})[d0] = v
-                block = {c: [{"d": d0, "v": vals[d0]} for d0 in sorted(vals)]
-                         for c, vals in out.items() if vals}
-                if block:
-                    compare[key] = block
-                    print(f"  compare {label}: "
-                          + ", ".join(f"{c}:{len(v)}" for c, v in block.items()))
-                else:
-                    warn(f"{label}: no chains matched {prefix}*")
-        except Exception as e:  # noqa: BLE001
-            warn(f"lending by chain: {e}")
-
     if not bw_reuse("compare", "tokenized_equity_volume", "tokenized equity by chain"):
         try:
             rows = chart_rows(CHARTS["tokeq_chain"][0])
