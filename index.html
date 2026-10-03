@@ -474,6 +474,14 @@
   .tp-reset { background: none; border: none; cursor: pointer; color: var(--mute);
               font: 700 10px Syne; letter-spacing: .07em; text-transform: uppercase; }
   .tp-reset:hover { color: var(--orange); }
+  .ushipped-head { display: flex; align-items: center; gap: 7px; margin: 14px 0 0;
+                   background: none; border: 0; cursor: pointer; padding: 6px 2px;
+                   font: 700 11px Syne; letter-spacing: .08em; text-transform: uppercase;
+                   color: var(--dim); }
+  .ushipped-head:hover { color: var(--peri); }
+  .ushipped-head[aria-expanded="true"] .tp-caret { transform: rotate(90deg); }
+  .ushipped-n { color: var(--peri); opacity: .7; letter-spacing: 0; }
+  .ushipped-grid { margin-top: 10px; }
   .tp-cat { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
             background: none; border: 0; cursor: pointer;
             font: 700 10px Syne; letter-spacing: .08em; text-transform: uppercase;
@@ -738,6 +746,7 @@
 <div class="shead"><h2>Network Upgrades</h2><span class="rule"></span>
   <span class="asof">per <a href="https://solana.com/upgrades" target="_blank" rel="noopener">solana.com/upgrades</a> + governance votes</span></div>
 <section class="grid" id="upgradeGrid"></section>
+<div id="upgradeShipped"></div>
 
 <!-- ------------------------------------- trending news | monthly highlights -->
 <div class="duo">
@@ -3177,19 +3186,20 @@ const UPGRADES = [
     tip: '<b>In simple terms:</b> Solana&rsquo;s inflation rate already shrinks every year; this doubles how fast — from 15% to 30% per year. Validators approved it in August 2026 in Solana&rsquo;s first binding governance vote (SGP-0002, 67% of participating stake in favor).<br><br><b>Why it matters:</b> the network hits its final 1.5% inflation about three years earlier (~2029 instead of ~2032), issuing roughly 19 million fewer SOL — about 2.6% less supply — which means less ongoing sell pressure from staking emissions.' },
   { name: 'Alpenglow', status: 'dev', desc: 'Next-generation consensus protocol targeting 150 ms finality.',
     tip: '<b>In simple terms:</b> a rebuild of how validators agree on new blocks. Today a transaction is fully final in about 12 seconds; Alpenglow targets 150 milliseconds.<br><br><b>Why it matters:</b> payments and trades would confirm about as fast as a card swipe, closing the gap with centralized exchanges.' },
-  { name: 'Reduced Slot Times', status: 'pending', desc: 'Cuts block time from 400 ms to 200 ms.',
+  { name: 'Reduced Slot Times', status: 'pending', desc: 'Now 250 ms, down from 400 ms; 200 ms is the target.',
     tip: '<b>In simple terms:</b> the network produces blocks twice as often.<br><br><b>Why it matters:</b> confirmations land roughly twice as fast and the chain can process more per second — apps feel snappier without any code changes.' },
   { name: 'Reduced Rent', status: 'pending', desc: 'Cuts on-chain storage deposits by 90%, phased in over time.',
     tip: '<b>In simple terms:</b> storing data on Solana requires a refundable deposit ("rent"); this cuts it by about 90%.<br><br><b>Why it matters:</b> creating accounts, tokens and app data gets much cheaper, lowering the cost of onboarding users at scale.' },
-  { name: 'Larger Transaction Sizes', status: 'pending', desc: 'Raises the max transaction size from 1,232 to 4,096 bytes.',
+  { name: 'Larger Transaction Sizes', status: 'live', when: 'Sep 2026',
+    desc: 'Raised the max transaction size from 1,232 to 4,096 bytes.',
     tip: '<b>In simple terms:</b> each transaction can carry roughly three times more instructions and data.<br><br><b>Why it matters:</b> complex actions — multi-hop swaps, batched DeFi operations — fit in a single transaction instead of being split apart or failing.' },
-  { name: '100M CU Blocks', status: 'live', desc: 'Raises block capacity from 60M to 100M compute units (+66%).',
+  { name: '100M CU Blocks', status: 'live', when: '2026', desc: 'Raises block capacity from 60M to 100M compute units (+66%).',
     tip: '<b>In simple terms:</b> each block can hold two-thirds more computation.<br><br><b>Why it matters:</b> more transactions land per block during busy periods, which means less congestion and steadier fees.' },
-  { name: 'Optimized Token Program', status: 'live', desc: 'Token operations use up to 98% less compute.',
+  { name: 'Optimized Token Program', status: 'live', when: '2026', desc: 'Token operations use up to 98% less compute.',
     tip: '<b>In simple terms:</b> the code behind token transfers was rewritten to be drastically cheaper for the network to run.<br><br><b>Why it matters:</b> the most common operation on Solana now takes a sliver of the block space it used to, freeing capacity for everything else.' },
-  { name: 'XDP on Solana', status: 'live', desc: 'Kernel-bypass networking for faster block propagation.',
+  { name: 'XDP on Solana', status: 'live', when: '2026', desc: 'Kernel-bypass networking for faster block propagation.',
     tip: '<b>In simple terms:</b> validators send and receive block data straight from the network card, skipping slow operating-system layers.<br><br><b>Why it matters:</b> blocks spread through the network faster, keeping slot times steady and forks rarer.' },
-  { name: 'BLS Pubkey & Validator Admission Ticket', status: 'live', desc: 'Validators register BLS keys to keep participating in consensus.',
+  { name: 'BLS Pubkey & Validator Admission Ticket', status: 'live', when: '2026', desc: 'Validators register BLS keys to keep participating in consensus.',
     tip: '<b>In simple terms:</b> validators register a new type of cryptographic key that lets thousands of votes be checked as one.<br><br><b>Why it matters:</b> it is the groundwork for Alpenglow — fast finality needs vote aggregation, and this gets every validator ready for it.' },
   { name: 'New Cryptography Schemes', status: 'dev', desc: 'Native BN254 G2 and BLS12-381 curve operations.',
     tip: '<b>In simple terms:</b> the math used by zero-knowledge proofs gets built into the network itself instead of being computed the slow way.<br><br><b>Why it matters:</b> privacy features, ZK bridges and rollup-style apps become far cheaper and more practical on Solana.' },
@@ -3197,17 +3207,45 @@ const UPGRADES = [
 const U_STATUS = { live: 'Live on Mainnet', pending: 'Pending Activation', dev: 'In Development',
                    gov: 'Approved by Vote' };
 
-function renderUpgrades() {
-  $('upgradeGrid').innerHTML = UPGRADES.map(u => `
+/* What is coming stays on the page; what has already landed goes behind a
+   disclosure. The section is about what to expect next, and a reader scanning
+   it should not have to sort the future out of the past — but the past is the
+   more useful half for anyone catching up, so it is one click away rather than
+   gone. */
+const U_CARD = u => `
     <div class="panel">
       <div class="crow">
         <h3 style="display:flex;align-items:center">${u.name}
           <span class="uinfo" tabindex="0" role="button" aria-label="What this means">?<span class="tipbox">${u.tip}</span></span>
         </h3>
-        <span class="uchip ${u.status}">${U_STATUS[u.status]}</span>
+        <span class="uchip ${u.status}">${U_STATUS[u.status]}${u.when ? ` · ${u.when}` : ''}</span>
       </div>
       <div class="udesc">${u.desc}</div>
-    </div>`).join('');
+    </div>`;
+
+const U_SHIPPED_OPEN = 'sos.upgradesShipped';
+
+function renderUpgrades() {
+  const ahead = UPGRADES.filter(u => u.status !== 'live');
+  const shipped = UPGRADES.filter(u => u.status === 'live');
+  $('upgradeGrid').innerHTML = ahead.map(U_CARD).join('');
+
+  const wrap = $('upgradeShipped');
+  if (!wrap) return;
+  let open = false;
+  try { open = JSON.parse(localStorage.getItem(U_SHIPPED_OPEN) || 'false'); } catch { /* private mode */ }
+
+  wrap.innerHTML = `
+    <button type="button" class="ushipped-head" aria-expanded="${open}">
+      <span class="tp-caret">&#9656;</span>
+      Already shipped
+      <span class="ushipped-n">${shipped.length}</span>
+    </button>
+    <section class="grid ushipped-grid"${open ? '' : ' hidden'}>${shipped.map(U_CARD).join('')}</section>`;
+  wrap.querySelector('.ushipped-head').addEventListener('click', () => {
+    try { localStorage.setItem(U_SHIPPED_OPEN, JSON.stringify(!open)); } catch { /* private mode */ }
+    renderUpgrades();
+  });
 }
 
 /* ------------------------------------------------------------- marquee */
