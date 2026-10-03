@@ -112,7 +112,7 @@ jobs:
           # exist as a curated chart (vault balances, for one).
           # Charts page at 100 as well; one page is not the catalogue.
           charts, page = [], 1
-          while page <= 40:
+          while page <= 120:   # the catalogue is well past 4,000
               try:
                   url = ("https://api.blockworks.com/v1/charts?"
                          + urllib.parse.urlencode({"page": page, "limit": 100}))
