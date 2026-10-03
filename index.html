@@ -2238,9 +2238,28 @@ function makeTrendCard(t) {
         `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
            <span class="sw" style="background:${c.color}"></span>${c.name}
            <span class="v num">${v != null ? t.fmt(v) : '—'}</span></button>`).join('');
+      /* Isolate, then add. From the default all-on state the first click shows
+         only what was clicked, rather than subtracting it — with eleven chains,
+         getting down to one or two meant nine clicks the other way round.
+         After that a click adds a chain, or removes one if more than one is
+         showing; clicking the last remaining chain restores the full set, so
+         there is always a way back without hunting. */
+      const allKeys = ranked.map(({ c }) => c.key);
       el.querySelectorAll('.legend .leg').forEach(b => b.addEventListener('click', () => {
-        const s = state.trendHidden[orig.key] ??= new Set();
-        s.has(b.dataset.chain) ? s.delete(b.dataset.chain) : s.add(b.dataset.chain);
+        const key = b.dataset.chain;
+        const hidden = state.trendHidden[orig.key] ??= new Set();
+        const shown = allKeys.filter(k => !hidden.has(k));
+        let next;
+        if (shown.length === allKeys.length) {
+          next = allKeys.filter(k => k !== key);          // isolate the clicked one
+        } else if (!hidden.has(key)) {
+          next = shown.length === 1
+            ? []                                          // last one clicked: show all
+            : [...hidden, key];                           // drop it
+        } else {
+          next = [...hidden].filter(k => k !== key);      // add it back
+        }
+        state.trendHidden[orig.key] = new Set(next);
         const fresh = makeTrendCard(orig);
         if (fresh) el.replaceWith(fresh);
       }));
