@@ -869,7 +869,7 @@ const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply
                 preLeverAgg: 'w', preLeverScale: 'logarithmic',
                 trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
                 trendHidden: {}, trendAggs: {}, trendFrom: {}, trendSeries: {}, trendCompare: {},
-                trendTypes: {}, trendWindow: {} };
+                trendTypes: {}, trendWindow: {}, trendPct: {} };
 
 /* ------------------------------------------------------- rainbow band model */
 // Power-law growth bands, constants lifted verbatim from solanarainbow.com:
@@ -1868,6 +1868,9 @@ function makeTrendCard(t) {
   const canBar = !!cmp && !t.noStack;
   const barMode = canBar && !!state.trendTypes[t.key];
   const stacked = barMode;
+  // Share of total, drawn as a 100% stack. Only meaningful once the bars are
+  // stacked — a percentage of a total nobody is adding up is not a share.
+  const pctMode = barMode && !!state.trendPct[t.key];
   // Per-card scale; comparisons default to log (the chains span magnitudes).
   const scale = state.trendScales[t.key] || (cmp ? 'log' : 'lin');
   // Rebased series cross zero and go negative, which a log axis cannot plot.
@@ -1901,7 +1904,7 @@ function makeTrendCard(t) {
                        : aggMode === 'sum' ? ' totals' : aggMode === 'mean' ? ' averages' : ', period end') : '')
                  + (t.rebase && period === 'd' ? ' · cumulative from window start' : '')
                  + (logScale ? ' · log scale' : '')
-                 + (barMode ? ' · stacked bars' : '')
+                 + (barMode ? (pctMode ? ' · share of total' : ' · stacked bars') : '')
                  + (smooth ? (period === 'd' ? ' · 7-day average' : ' · 7-period average') : '');
   el.innerHTML = `<div class="crow"><h3 style="display:flex;align-items:center">${t.title}${t.tip
         ? `<span class="uinfo" tabindex="0" role="button" aria-label="What is this metric?">?<span class="tipbox">${t.tip}</span></span>` : ''}</h3>
@@ -1922,6 +1925,9 @@ function makeTrendCard(t) {
           viewBox="0 0 12 12" aria-hidden="true" style="fill:currentColor;vertical-align:-1px"
           ><rect x="0" y="6" width="3" height="6" rx=".5"/><rect x="4.5" y="3" width="3" height="9" rx=".5"
           /><rect x="9" y="1" width="3" height="11" rx=".5"/></svg></button>` : ''}
+        ${barMode ? `<button class="tgl" data-cpct aria-pressed="${pctMode}"
+          title="${pctMode ? 'Show totals' : 'Show share of total'}"
+          aria-label="${pctMode ? 'Show totals' : 'Show share of total'}">%</button>` : ''}
         ${t.noSmooth ? '' : `<span class="ctl-sep"></span>
         <button class="tgl" data-csmooth aria-pressed="${smooth}">SMOOTH</button>`}</span></div>
     ${t.variants ? `<div class="trend-ctl small" style="margin-top:8px">${orig.variants.map(v =>
@@ -1965,6 +1971,11 @@ function makeTrendCard(t) {
   });
   el.querySelector('[data-ctype]')?.addEventListener('click', () => {
     state.trendTypes[t.key] = !state.trendTypes[t.key];
+    const fresh = makeTrendCard(orig);
+    if (fresh) el.replaceWith(fresh);
+  });
+  el.querySelector('[data-cpct]')?.addEventListener('click', () => {
+    state.trendPct[t.key] = !state.trendPct[t.key];
     const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   });
@@ -2216,9 +2227,30 @@ function makeTrendCard(t) {
   if (plotted.length) setNote(plotted[plotted.length - 1]);
 
   if (barMode) {
+    // In share mode each column is normalised against its own visible total, so
+    // the stack reads as composition over time rather than size over time.
+    // Hidden chains are excluded from the denominator — the share has to be of
+    // what is actually drawn, or the columns stop summing to 100%.
+    let series = datasets;
+    if (pctMode) {
+      const totals = new Map();
+      for (const ds of datasets) {
+        if (ds.hidden) continue;
+        for (const pt of ds.data || []) {
+          if (pt && pt.y > 0) totals.set(pt.x, (totals.get(pt.x) || 0) + pt.y);
+        }
+      }
+      series = datasets.map(ds => ({
+        ...ds,
+        data: (ds.data || []).map(pt => {
+          const tot = totals.get(pt.x);
+          return { ...pt, y: tot ? (pt.y / tot) * 100 : null };
+        }),
+      }));
+    }
     // Same datasets, drawn as columns. borderColor carries each chain's colour
     // on the line datasets, so it becomes the fill here.
-    const barSets = datasets.map(ds => ({
+    const barSets = series.map(ds => ({
       label: ds.label, data: ds.data, backgroundColor: ds.borderColor,
       borderColor: ds.borderColor, borderWidth: 0, borderRadius: 1,
       categoryPercentage: 0.98, barPercentage: 0.96,
@@ -2230,6 +2262,17 @@ function makeTrendCard(t) {
     // A stack is read as a total, so the axis has to start at zero even when
     // every chain is far above it.
     if (stacked) opts.scales.y.beginAtZero = true;
+    if (pctMode) {
+      // Pin the axis: letting it autoscale makes a 100% stack look like it
+      // changes height, which is the one thing this view is meant to rule out.
+      opts.scales.y.min = 0;
+      opts.scales.y.max = 100;
+      opts.scales.y.ticks = { ...opts.scales.y.ticks, callback: v => `${v}%` };
+      opts.plugins.tooltip = { ...opts.plugins.tooltip,
+        callbacks: { ...opts.plugins.tooltip.callbacks,
+          label: c => ` ${c.dataset.label}  ${c.parsed.y == null ? '—'
+                        : c.parsed.y.toFixed(1) + '%'}` } };
+    }
     trendCharts[t.key] = new Chart(canvas, {
       type: 'bar', data: { datasets: barSets }, options: opts,
     });
