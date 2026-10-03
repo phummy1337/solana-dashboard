@@ -49,10 +49,21 @@ jobs:
           # data is licensed.
           chart_id = (os.environ.get("CHART") or "").strip()
           if chart_id:
-              d = fetch(f"v1/charts/{chart_id}/data?limit=2000&page=1")
-              rows = d.get("data") or []
-              print(f"chart {chart_id}: {d.get('total', '?')} rows total, "
-                    f"{len(rows)} in page 1")
+              # Walk every page, the way chart_rows does, so the newest rows are
+              # actually seen -- page one of this table is the oldest 2,000.
+              rows, page, total = [], 1, None
+              while page <= 40:
+                  d = fetch(f"v1/charts/{chart_id}/data?limit=2000&page={page}")
+                  batch = d.get("data") or []
+                  total = d.get("total", total)
+                  print(f"  page {page}: {len(batch)} rows")
+                  if not batch:
+                      break
+                  rows += batch
+                  if total and len(rows) >= total:
+                      break
+                  page += 1
+              print(f"chart {chart_id}: {total} rows total, {len(rows)} fetched")
               if rows:
                   # Union across rows, and the newest row separately: these
                   # tables carry only the keys a row has data for, so reading
