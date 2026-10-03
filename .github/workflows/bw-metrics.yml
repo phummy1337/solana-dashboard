@@ -52,6 +52,33 @@ jobs:
                   break
               page += 1
 
+          # Charts are a separate catalogue from metrics, and some series only
+          # exist as a curated chart (vault balances, for one).
+          charts = []
+          for path in ("v1/charts", "v1/charts?limit=500"):
+              try:
+                  req = urllib.request.Request(
+                      f"https://api.blockworks.com/{path}",
+                      headers={"x-api-key": key,
+                               "User-Agent": "solana-dashboard/1.0 (+metrics-catalogue)"})
+                  raw = json.load(urllib.request.urlopen(req, timeout=60))
+                  charts = raw if isinstance(raw, list) else (
+                           raw.get("data") or raw.get("charts") or raw.get("results") or [])
+                  if charts:
+                      break
+              except Exception as e:
+                  print(f"  charts via {path}: {e}")
+          if charts:
+              print(f"\ncharts catalogue holds {len(charts)}; matching {want!r}")
+              for c in charts:
+                  if not isinstance(c, dict):
+                      continue
+                  blob = " ".join(str(c.get(k, "")) for k in
+                                  ("id", "name", "title", "slug", "description"))
+                  if want in blob.lower():
+                      print(f"  id={c.get('id')}  {str(c.get('name') or c.get('title'))[:70]}")
+              print()
+
           print(f"catalogue holds {len(rows)} metrics; matching {want!r}\n")
           hits = 0
           for m in rows:
