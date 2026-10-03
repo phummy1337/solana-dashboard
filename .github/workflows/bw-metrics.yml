@@ -74,8 +74,9 @@ jobs:
                       print(f"{q.split('?')[1][:28]:<30} {e}")
               raise SystemExit(0)
 
-          chart_id = (os.environ.get("CHART") or "").strip()
-          if chart_id:
+          # Accept several ids at once: adding a family of cards means checking
+          # each one's columns and frontier before writing code against any.
+          for chart_id in [x.strip() for x in (os.environ.get("CHART") or "").split(",") if x.strip()]:
               # Walk every page, the way chart_rows does, so the newest rows are
               # actually seen -- page one of this table is the oldest 2,000.
               rows, page, total = [], 1, None
@@ -112,6 +113,8 @@ jobs:
                       if vals:
                           print(f"{col}: {len(vals)} distinct -> "
                                 + ", ".join(sorted(map(str, vals))[:14]))
+              print()
+          if (os.environ.get("CHART") or "").strip():
               raise SystemExit(0)
 
           # The catalogue pages at 100; walk it rather than judging from page one.
