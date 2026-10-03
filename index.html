@@ -474,8 +474,9 @@
   .tp-reset { background: none; border: none; cursor: pointer; color: var(--mute);
               font: 700 10px Syne; letter-spacing: .07em; text-transform: uppercase; }
   .tp-reset:hover { color: var(--orange); }
-  .ushipped-head { display: flex; align-items: center; gap: 7px; margin: 14px 0 0;
-                   background: none; border: 0; cursor: pointer; padding: 6px 2px;
+  .ushipped-bar { padding-top: 18px; padding-bottom: 0; display: block; }
+  .ushipped-head { display: flex; align-items: center; gap: 7px;
+                   background: none; border: 0; cursor: pointer; padding: 6px 0;
                    font: 700 11px Syne; letter-spacing: .08em; text-transform: uppercase;
                    color: var(--dim); }
   .ushipped-head:hover { color: var(--peri); }
@@ -943,8 +944,20 @@ const gridCfg = { color: 'rgba(143,165,212,0.16)', drawTicks: false };
    tighter 1/2/5 ladder: Chart.js labels decades and autoskips anything closer,
    so a top of $200M drew no line at all — the bar cleared the last label just
    as before. */
+/* Round a log axis out to whole decades — but only when the data actually
+   spans more than one. Eleven chains running from 6 to 1.8M need decade ticks
+   to be readable at all; a single chain moving 1.0M to 1.3M does not, and
+   expanding it to 1M–10M spent nine tenths of the plot on empty space. Inside a
+   decade the limits are padded slightly instead, which leaves the ratio small
+   enough for afterBuildTicks to lay out round intermediate ticks. */
 function logDecades(axis) {
   if (axis.type !== 'logarithmic' || !(axis.max > 0) || !(axis.min > 0)) return;
+  if (axis.max / axis.min < 10) {
+    const pad = (axis.max / axis.min) ** 0.12;      // a touch of air, in ratio
+    axis.min /= pad;
+    axis.max *= pad;
+    return;
+  }
   axis.max = 10 ** Math.ceil(Math.log10(axis.max) - 1e-9);
   axis.min = 10 ** Math.floor(Math.log10(axis.min) + 1e-9);
 }
@@ -1178,7 +1191,7 @@ const TRENDS = [
     tip: '<b>In simple terms:</b> what the middle transaction costs that day — half cost less, half cost more. The median is used rather than the average so a handful of enormous transactions cannot skew it.<br><br><b>Why it matters:</b> this is the number a normal user actually feels. Cheap, predictable fees are what let payments, gaming and high-frequency apps work at all.' },
   { key: 'fee_vol_card', cat: 'Fee quality', compare: 'fee_vol', noStack: true, /* a volatility measure */ title: 'Median Fee Volatility', color: '#EF4444',
     fmt: feeUsd, agg: 'mean',
-    tip: '<b>In simple terms:</b> how much the median fee swings around — the 30-day rolling standard deviation of a chain&rsquo;s daily median fee, in dollars.<br><br><b>Why it matters:</b> a low fee is only useful if it stays low. High volatility means costs spike without warning, which is what makes budgeting for on-chain activity difficult.' },
+    tip: '<b>In simple terms:</b> how much the median fee swings around — the 30-day rolling standard deviation of a chain&rsquo;s daily median fee, in dollars.<br><br><b>Why it matters:</b> a low fee is only useful if it stays low. High volatility means costs spike without warning, which is what makes budgeting for onchain activity difficult.' },
 ];
 const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y', 'custom'];
 const RANGE_LABEL = { custom: 'From…' };
@@ -2514,7 +2527,7 @@ function renderTiles() {
     ['Active Traders', compact(dm.traders), lag('traders', 'unique wallets')],
     ['DeFi TVL', usd(s.defi_tvl), tvlSub],
     ['Stablecoin Supply', usd(s.stablecoin_supply), stableSub],
-    ['Tokenized Equity', usd(s.tokenized_equity_supply), 'on-chain supply'],
+    ['Tokenized Equity', usd(s.tokenized_equity_supply), 'onchain supply'],
     ['Tokenized Equity Volume', usd(dm.tokenized_equity_volume),
       lag('tokenized_equity_volume', '')],
     ['Total Trading Volume', usd(tradedDaily), 'spot + perps'],
@@ -2529,7 +2542,7 @@ function renderTiles() {
     ['Avg. Daily Traders', compact(s.avg_daily_traders_ytd), 'unique, per day YTD'],
     ['DeFi TVL', usd(s.defi_tvl), tvlSub],
     ['Stablecoin Supply', usd(s.stablecoin_supply), stableSub],
-    ['Tokenized Equity', usd(s.tokenized_equity_supply), 'on-chain supply'],
+    ['Tokenized Equity', usd(s.tokenized_equity_supply), 'onchain supply'],
     ['YTD Tokenized Equity Volume', usd(s.ytd_tokenized_equity_volume), ''],
     ['Total Trading Volume', usd(tradedYtd), 'spot + perps'],
     ['YTD Perps Volume', usd(s.ytd_perps_volume), 'futures notional'],
@@ -3196,31 +3209,35 @@ function renderYield(y) {
 }
 
 /* --------------------------------------------------------- network upgrades */
-// Mirrors solana.com/upgrades (checked 2026-08-21). Statuses move slowly;
+// Mirrors solana.com/upgrades (checked 2026-10-03). Statuses move slowly;
 // update this list when that page changes. Tooltips are the plain-English
 // "what does this mean and why should I care" layer.
 const UPGRADES = [
   { name: 'Double Disinflation Rate (SIMD-0550)', status: 'gov',
     desc: 'SOL inflation now decays 30% per year instead of 15%.',
     tip: '<b>In simple terms:</b> Solana&rsquo;s inflation rate already shrinks every year; this doubles how fast — from 15% to 30% per year. Validators approved it in August 2026 in Solana&rsquo;s first binding governance vote (SGP-0002, 67% of participating stake in favor).<br><br><b>Why it matters:</b> the network hits its final 1.5% inflation about three years earlier (~2029 instead of ~2032), issuing roughly 19 million fewer SOL — about 2.6% less supply — which means less ongoing sell pressure from staking emissions.' },
-  { name: 'Alpenglow', status: 'dev', desc: 'Next-generation consensus protocol targeting 150 ms finality.',
+  { name: 'Alpenglow', status: 'dev', when: 'Agave 4.3',
+    desc: 'Next-generation consensus protocol targeting 150 ms finality.',
     tip: '<b>In simple terms:</b> a rebuild of how validators agree on new blocks. Today a transaction is fully final in about 12 seconds; Alpenglow targets 150 milliseconds.<br><br><b>Why it matters:</b> payments and trades would confirm about as fast as a card swipe, closing the gap with centralized exchanges.' },
-  { name: 'Reduced Slot Times', status: 'pending', desc: 'Now 250 ms, down from 400 ms; 200 ms is the target.',
+  { name: 'Reduced Slot Times', status: 'pending', when: 'partly live',
+    desc: 'Now 250 ms, down from 400 ms; 200 ms is the target.',
     tip: '<b>In simple terms:</b> the network produces blocks twice as often.<br><br><b>Why it matters:</b> confirmations land roughly twice as fast and the chain can process more per second — apps feel snappier without any code changes.' },
-  { name: 'Reduced Rent', status: 'pending', desc: 'Cuts on-chain storage deposits by 90%, phased in over time.',
+  { name: 'Reduced Rent', status: 'pending', when: 'partly live',
+    desc: 'Cuts onchain storage deposits by 90%, phased over five steps.',
     tip: '<b>In simple terms:</b> storing data on Solana requires a refundable deposit ("rent"); this cuts it by about 90%.<br><br><b>Why it matters:</b> creating accounts, tokens and app data gets much cheaper, lowering the cost of onboarding users at scale.' },
   { name: 'Larger Transaction Sizes', status: 'live', when: 'Sep 2026',
     desc: 'Raised the max transaction size from 1,232 to 4,096 bytes.',
     tip: '<b>In simple terms:</b> each transaction can carry roughly three times more instructions and data.<br><br><b>Why it matters:</b> complex actions — multi-hop swaps, batched DeFi operations — fit in a single transaction instead of being split apart or failing.' },
-  { name: '100M CU Blocks', status: 'live', when: '2026', desc: 'Raises block capacity from 60M to 100M compute units (+66%).',
+  { name: '100M CU Blocks', status: 'live', when: 'Jul 2026', desc: 'Raises block capacity from 60M to 100M compute units (+66%).',
     tip: '<b>In simple terms:</b> each block can hold two-thirds more computation.<br><br><b>Why it matters:</b> more transactions land per block during busy periods, which means less congestion and steadier fees.' },
-  { name: 'Optimized Token Program', status: 'live', when: '2026', desc: 'Token operations use up to 98% less compute.',
+  { name: 'Optimized Token Program', status: 'live', when: 'May 2026', desc: 'Token operations use up to 98% less compute.',
     tip: '<b>In simple terms:</b> the code behind token transfers was rewritten to be drastically cheaper for the network to run.<br><br><b>Why it matters:</b> the most common operation on Solana now takes a sliver of the block space it used to, freeing capacity for everything else.' },
-  { name: 'XDP on Solana', status: 'live', when: '2026', desc: 'Kernel-bypass networking for faster block propagation.',
+  { name: 'XDP on Solana', status: 'live', when: 'May 2026', desc: 'Kernel-bypass networking for faster block propagation.',
     tip: '<b>In simple terms:</b> validators send and receive block data straight from the network card, skipping slow operating-system layers.<br><br><b>Why it matters:</b> blocks spread through the network faster, keeping slot times steady and forks rarer.' },
-  { name: 'BLS Pubkey & Validator Admission Ticket', status: 'live', when: '2026', desc: 'Validators register BLS keys to keep participating in consensus.',
+  { name: 'BLS Pubkey & Validator Admission Ticket', status: 'live', when: 'May 2026', desc: 'Validators register BLS keys to keep participating in consensus.',
     tip: '<b>In simple terms:</b> validators register a new type of cryptographic key that lets thousands of votes be checked as one.<br><br><b>Why it matters:</b> it is the groundwork for Alpenglow — fast finality needs vote aggregation, and this gets every validator ready for it.' },
-  { name: 'New Cryptography Schemes', status: 'dev', desc: 'Native BN254 G2 and BLS12-381 curve operations.',
+  { name: 'New Cryptography Schemes', status: 'live', when: 'May 2026',
+    desc: 'Native BN254 G2 and BLS12-381 curve operations.',
     tip: '<b>In simple terms:</b> the math used by zero-knowledge proofs gets built into the network itself instead of being computed the slow way.<br><br><b>Why it matters:</b> privacy features, ZK bridges and rollup-style apps become far cheaper and more practical on Solana.' },
 ];
 const U_STATUS = { live: 'Live on Mainnet', pending: 'Pending Activation', dev: 'In Development',
@@ -3254,12 +3271,17 @@ function renderUpgrades() {
   let open = false;
   try { open = JSON.parse(localStorage.getItem(U_SHIPPED_OPEN) || 'false'); } catch { /* private mode */ }
 
+  // The heading rides inside a .grid so it inherits whatever horizontal padding
+  // applies at this width — hardcoding 48px lined up on a wide screen and sat
+  // 30px proud of the cards on a narrow one, where .grid computes to 18px.
   wrap.innerHTML = `
-    <button type="button" class="ushipped-head" aria-expanded="${open}">
-      <span class="tp-caret">&#9656;</span>
-      Already shipped
-      <span class="ushipped-n">${shipped.length}</span>
-    </button>
+    <section class="grid ushipped-bar">
+      <button type="button" class="ushipped-head" aria-expanded="${open}">
+        <span class="tp-caret">&#9656;</span>
+        Already shipped
+        <span class="ushipped-n">${shipped.length}</span>
+      </button>
+    </section>
     <section class="grid ushipped-grid"${open ? '' : ' hidden'}>${shipped.map(U_CARD).join('')}</section>`;
   wrap.querySelector('.ushipped-head').addEventListener('click', () => {
     try { localStorage.setItem(U_SHIPPED_OPEN, JSON.stringify(!open)); } catch { /* private mode */ }

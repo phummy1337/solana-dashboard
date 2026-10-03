@@ -48,7 +48,7 @@
           "d": "2026-08-21",
           "cat": "Real assets",
           "t": "Shinhan signs on for a won-denominated tokenized fund",
-          "b": "A four-party MOU with the Solana Foundation, Etherfuse and Orca to test a KRW ultra-short bond fund modelled on BUIDL, covering KYC/AML, issuance, FX and on-chain liquidity. A proof of concept rather than a live fund — Korean STO rules are expected in 2027.",
+          "b": "A four-party MOU with the Solana Foundation, Etherfuse and Orca to test a KRW ultra-short bond fund modelled on BUIDL, covering KYC/AML, issuance, FX and onchain liquidity. A proof of concept rather than a live fund — Korean STO rules are expected in 2027.",
           "u": "https://crypto.news/shinhan-taps-solana-for-korean-won-tokenized-fund/"
         },
         {
@@ -84,7 +84,7 @@
         {
           "d": "2026-08-28",
           "cat": "Governance",
-          "t": "The first binding on-chain vote passes Double Disinflation",
+          "t": "The first binding onchain vote passes Double Disinflation",
           "b": "SGP-0001 (Constitution) and SGP-0002 (Double Disinflation) passed; SGP-0003 (Resource and Inclusion Fee) failed at 53.9%. SGP-0002 doubles annual disinflation from 15% to 30%, pulling terminal 1.5% inflation forward to H1 2029 from 2032 and cutting roughly 18.9M SOL of issuance over six years. It cleared the two-thirds bar at 67.001% — 176.29M SOL for against 66.19M, on 60.7% of eligible stake and 1,326 validators. A mandate rather than an instant supply change: SIMD-0607 has to merge first so Agave and Firedancer compute identical staking rewards.",
           "u": "https://decrypt.co/376825/solana-sol-disinflation-vote-passes",
           "card": "Double Disinflation passes"
