@@ -20,6 +20,11 @@ on:
         type: string
         required: false
         default: ""
+      probe:
+        description: "Set to 1 to test server-side chart search instead"
+        type: string
+        required: false
+        default: ""
 
 jobs:
   list:
@@ -30,6 +35,7 @@ jobs:
           BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
           MATCH: ${{ github.event.inputs.match }}
           CHART: ${{ github.event.inputs.chart }}
+          PROBE_SEARCH: ${{ github.event.inputs.probe }}
         run: |
           python3 - <<'PY'
           import json, os, urllib.request, urllib.parse
@@ -47,6 +53,27 @@ jobs:
           # Describing a chart: shape only -- column names, row count, date span.
           # No values are printed; this repo's Actions logs are public and the
           # data is licensed.
+          # Does the charts endpoint filter server-side? Walking 100-at-a-time
+          # has been returning inconsistent totals, so try asking it directly.
+          if want and os.environ.get("PROBE_SEARCH") == "1":
+              for q in (f"v1/charts?search={urllib.parse.quote(want)}&limit=100",
+                        f"v1/charts?q={urllib.parse.quote(want)}&limit=100",
+                        f"v1/charts?name={urllib.parse.quote(want)}&limit=100"):
+                  try:
+                      d = fetch(q)
+                      got = d if isinstance(d, list) else (
+                            d.get("data") or d.get("charts") or d.get("results") or [])
+                      names = [f"id={c.get('id')} {c.get('name') or c.get('title')}"
+                               for c in got if isinstance(c, dict)]
+                      hit = [n for n in names if want in n.lower()]
+                      print(f"{q.split('?')[1][:28]:<30} returned {len(got):>4}"
+                            f"  matching: {len(hit)}")
+                      for n in hit[:12]:
+                          print("   ", n)
+                  except Exception as e:
+                      print(f"{q.split('?')[1][:28]:<30} {e}")
+              raise SystemExit(0)
+
           chart_id = (os.environ.get("CHART") or "").strip()
           if chart_id:
               # Walk every page, the way chart_rows does, so the newest rows are
