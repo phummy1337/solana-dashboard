@@ -1,0 +1,41 @@
+name: Blockworks usage
+on:
+  workflow_dispatch:
+jobs:
+  usage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Count a build's calls and ask the API about quota
+        env:
+          BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          key = os.environ["BLOCKWORKS_API_KEY"]
+          def call(path):
+              req = urllib.request.Request(
+                  f"https://api.blockworks.com/{path}",
+                  headers={"x-api-key": key,
+                           "User-Agent": "solana-dashboard/1.0 (+usage-probe)"})
+              try:
+                  r = urllib.request.urlopen(req, timeout=60)
+                  hdr = {k.lower(): v for k, v in r.headers.items()}
+                  keep = {k: v for k, v in hdr.items()
+                          if any(w in k for w in
+                                 ("ratelimit", "rate-limit", "quota", "remaining",
+                                  "limit", "usage", "credit"))}
+                  return r.status, keep
+              except Exception as e:
+                  code = getattr(e, "code", "ERR")
+                  hdr = {}
+                  if hasattr(e, "headers"):
+                      hdr = {k.lower(): v for k, v in e.headers.items()
+                             if any(w in k.lower() for w in
+                                    ("ratelimit", "quota", "remaining", "credit"))}
+                  return code, hdr
+
+          # one cheap real call, to read whatever the edge reports back
+          print("GET v1/metrics/transaction-total ->", call("v1/metrics/transaction-total?project=solana"))
+          for p in ("v1/usage", "v1/account", "v1/me", "v1/account/usage", "v1/subscription"):
+              print(f"{p:<22}", call(p)[0])
+          PY
