@@ -1131,6 +1131,24 @@ const TRENDS = [
     noteUnit: ' · average transactions per second · Solana excludes vote transactions',
     tip: '<b>In simple terms:</b> the average number of transactions each chain settles per second, worked out from its daily count.<br><br><b>Why it matters:</b> it is the plainest read on raw throughput — how much traffic a network actually carries, rather than how much it claims it could.<br><br><b>Worth knowing:</b> Solana is counted without consensus votes, which its validators post as ordinary transactions. Including them would roughly treble the figure and would not be comparable with any other chain here. Source: Blockworks.' },
   { key: 'ytd_dex_volume', cat: 'Trading',          compare: 'dex_volume',        title: 'Spot DEX Volume',   color: '#14F195', fmt: usd, agg: 'sum' },
+  { key: 'tokeq_supply_chain', cat: 'Tokenized equities', compare: 'tokeq_supply_chain',
+    title: 'Tokenized Equity Supply', color: '#F5A524', fmt: usd, agg: 'last',
+    tip: '<b>In simple terms:</b> the market value of tokenized stocks live on each chain.<br><br><b>Why it matters:</b> supply is the size of the market itself, as distinct from how much of it trades. Read it against DEX Volume to see whether a chain holds tokenized equities or actually turns them over. Source: Blockworks.' },
+  { key: 'tokeq_dexvol_chain', cat: 'Tokenized equities', compare: 'tokeq_dexvol_chain',
+    title: 'Tokenized Equity DEX Volume', color: '#14F195', fmt: usd, agg: 'sum',
+    tip: '<b>In simple terms:</b> how much tokenized stock actually changed hands onchain, by chain.<br><br><b>Why it matters:</b> the liquidity test. A chain can host a large supply and trade almost none of it; volume is where the market is real. Source: Blockworks.' },
+  { key: 'tokeq_holders', cat: 'Tokenized equities', compare: 'tokeq_holders',
+    title: 'Tokenized Equity Holders', color: '#38BDF8', fmt: compact, agg: 'last',
+    tip: '<b>In simple terms:</b> how many distinct wallets hold a tokenized stock on each chain.<br><br><b>Why it matters:</b> supply and volume can both be concentrated in very few hands. Holders is the distribution measure — whether a chain has a market or a handful of large positions. Source: Blockworks.' },
+  { key: 'tokeq_products', cat: 'Tokenized equities', compare: 'tokeq_products',
+    title: 'Tokenized Equity Products', color: '#A855F7', fmt: num1, agg: 'last',
+    tip: '<b>In simple terms:</b> how many distinct tokenized equity products exist on each chain.<br><br><b>Why it matters:</b> breadth rather than size. A chain with many products is being used as issuance infrastructure; one with few but large products is carrying concentrated demand. Source: Blockworks.' },
+  { key: 'tokeq_lend_deposits', cat: 'Tokenized equities', compare: 'tokeq_lend_deposits',
+    title: 'Tokenized Equity Lending Deposits', color: '#FBBF24', fmt: usd, agg: 'last',
+    tip: '<b>In simple terms:</b> tokenized stock posted into lending protocols on each chain.<br><br><b>Why it matters:</b> it marks the point where tokenized equities stop being a holding and start being collateral — the step that makes them useful in DeFi rather than merely present in it. Source: Blockworks.' },
+  { key: 'tokeq_lend_borrows', cat: 'Tokenized equities', compare: 'tokeq_lend_borrows',
+    title: 'Tokenized Equity Lending Borrows', color: '#FB7185', fmt: usd, agg: 'last',
+    tip: '<b>In simple terms:</b> borrowed against tokenized equity collateral, by chain.<br><br><b>Why it matters:</b> read with Lending Deposits it gives the utilisation of tokenized stock as collateral — how much of what is posted is actually being levered against. Source: Blockworks.' },
   { key: 'chain_fees', cat: 'Economics', compare: 'chain_fees', title: 'Chain Fees', color: '#FBBF24', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> everything users pay the network itself in a day — the gas, priority fees and tips that go to validators or get burned, before any app takes its cut.<br><br><b>Why it matters:</b> this is the chain\u2019s own top line. Read it against Chain Revenue to see how much the network keeps rather than passes through, and against App Fees to see whether the value sits in the rails or in what is built on them. Source: DefiLlama.' },
   { key: 'chain_revenue', cat: 'Economics', compare: 'chain_revenue', title: 'Chain Revenue', color: '#FB7185', fmt: usd, agg: 'sum',
@@ -1334,7 +1352,17 @@ function trendOpen() {
   try { return JSON.parse(localStorage.getItem(TREND_OPEN) || '{}') || {}; }
   catch { return {}; }
 }
-const TREND_CATS = ['Markets', 'Activity', 'Trading', 'Economics', 'Fee quality'];
+const TREND_CATS = ['Markets', 'Activity', 'Trading', 'Economics',
+                   'Tokenized equities', 'Fee quality'];
+/* One colour per section, used for the picker's dots. Per-card colours made the
+   list a rainbow with no meaning in it — the dot now says which group a card
+   belongs to, which is the only thing it can usefully say in a list already
+   grouped under headings. */
+const TREND_CAT_COLOR = {
+  'Markets': '#14F195', 'Activity': '#38BDF8', 'Trading': '#A855F7',
+  'Economics': '#F97316', 'Tokenized equities': '#F5A524', 'Fee quality': '#FBBF24',
+  'Other': '#8FA5D4',
+};
 
 function renderTrendPicker() {
   const box = $('trendPicker');
@@ -1374,6 +1402,7 @@ function renderTrendPicker() {
     caret.className = 'tp-caret';
     caret.textContent = '▸';
     const n = items.filter(t => picked.includes(t.key)).length;
+    h.style.color = TREND_CAT_COLOR[cat] || TREND_CAT_COLOR.Other;
     h.append(caret, document.createTextNode(cat));
     if (n) {
       const badge = document.createElement('span');
@@ -1403,7 +1432,7 @@ function renderTrendPicker() {
       }
       const dot = document.createElement('span');
       dot.className = 'tp-dot';
-      dot.style.color = t.color;
+      dot.style.color = TREND_CAT_COLOR[t.cat] || TREND_CAT_COLOR.Other;
       b.append(dot, document.createTextNode(t.title));
       b.addEventListener('click', () => {
         // At the cap, adding drops the oldest pick rather than refusing. The

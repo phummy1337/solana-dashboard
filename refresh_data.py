@@ -60,6 +60,14 @@ CHARTS = {
     "tokeq_vol":  (10634, "Solana: Tokenized Equities Volume by Token Issuer"),
     "tokeq_sup":  (10631, "Solana: Tokenized Equities Supply"),
     "tokeq_chain": (6874, "Spot DEXs: Tokenized Equities Volume by Blockchain"),
+    # The "Chain Comparison" tokenized-equity family. All long-format: one row
+    # per (date, blockchain) with the value in a named column, so one reader
+    # handles the lot. 12978 carries deposits and borrows together.
+    "ce_tokeq_supply":   (12975, "Chain Comparison: Tokenized Equity Supply"),
+    "ce_tokeq_dexvol":   (12980, "Chain Comparison: Tokenized Equities Spot DEX Volume"),
+    "ce_tokeq_lending":  (12978, "Chain Comparison: Tokenized Equities Lending"),
+    "ce_tokeq_holders":  (13612, "Chain Comparison: Tokenized Equity Holders"),
+    "ce_tokeq_products": (13613, "Chain Comparison: Tokenized Equity Products"),
 }
 
 # Comparison sets for the Activity Trends charts: Solana vs major L1/L2s.
@@ -955,6 +963,59 @@ def main() -> int:
     # Tokenized-asset volume by blockchain (chart 6874). Equities-only isn't
     # broken out for most of the history, so approximate it as total tokenized
     # asset volume minus the commodities category where that's reported.
+    # ------------------------------------ tokenized equities, by chain
+    # These charts are long-format — a row per (date, blockchain) with the
+    # value in a named column — so one reader serves all five. Chains are
+    # matched on the chart's own display names, which differ from our keys.
+    CE_CHAINS = {"solana": "solana", "ethereum": "ethereum", "base": "base",
+                 "arbitrum": "arbitrum", "bnb chain": "bnb", "bnb": "bnb",
+                 "avalanche": "avalanche", "robinhood": "robinhood",
+                 "hyperevm": "hyperevm", "sui": "sui", "tron": "tron",
+                 "polygon": "polygon"}
+
+    def chain_comparison(chart_key: str, value_col: str, block: str, label: str,
+                         date_col: str = "date") -> None:
+        """One compare block from a long-format Chain Comparison chart."""
+        if bw_reuse("compare", block, label):
+            return
+        try:
+            rows = chart_rows(CHARTS[chart_key][0])
+            out: dict = {}
+            for r in rows:
+                v = r.get(value_col)
+                name = (r.get("blockchain") or r.get("chain_name") or "").strip().lower()
+                chain = CE_CHAINS.get(name)
+                d0 = (r.get(date_col) or r.get("dt") or "")[:10]
+                if chain and v is not None and d0 and since <= d0 < today_utc:
+                    out.setdefault(chain, {})[d0] = v
+            blk = {c: [{"d": d0, "v": vals[d0]} for d0 in sorted(vals)]
+                   for c, vals in out.items() if vals}
+            if blk:
+                compare[block] = blk
+                newest = max(p[-1]["d"] for p in blk.values())
+                print(f"  compare {label}: "
+                      + ", ".join(f"{c}:{len(v)}" for c, v in blk.items())
+                      + f" (through {newest})")
+            else:
+                warn(f"{label}: no chains matched")
+        except Exception as e:  # noqa: BLE001
+            warn(f"{label}: {e}")
+
+    chain_comparison("ce_tokeq_supply",   "circulating_supply_usd",
+                     "tokeq_supply_chain", "tokenized equity supply by chain")
+    chain_comparison("ce_tokeq_dexvol",   "volume_usd",
+                     "tokeq_dexvol_chain", "tokenized equity DEX volume by chain")
+    chain_comparison("ce_tokeq_holders",  "total_holders",
+                     "tokeq_holders", "tokenized equity holders")
+    chain_comparison("ce_tokeq_products", "num_products",
+                     "tokeq_products", "tokenized equity products")
+    # One chart, two cards: deposits and borrows sit side by side in it, and the
+    # second call is skipped because the first leaves the block current.
+    chain_comparison("ce_tokeq_lending",  "deposits_usd",
+                     "tokeq_lend_deposits", "tokenized equity lending deposits")
+    chain_comparison("ce_tokeq_lending",  "borrows_usd",
+                     "tokeq_lend_borrows", "tokenized equity lending borrows")
+
     if not bw_reuse("compare", "tokenized_equity_volume", "tokenized equity by chain"):
         try:
             rows = chart_rows(CHARTS["tokeq_chain"][0])
