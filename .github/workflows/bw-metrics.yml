@@ -68,7 +68,7 @@ jobs:
                       hit = [n for n in names if want in n.lower()]
                       print(f"{q.split('?')[1][:28]:<30} returned {len(got):>4}"
                             f"  matching: {len(hit)}")
-                      for n in hit[:12]:
+                      for n in hit[:80]:
                           print("   ", n)
                   except Exception as e:
                       print(f"{q.split('?')[1][:28]:<30} {e}")
