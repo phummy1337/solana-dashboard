@@ -474,6 +474,13 @@
   .tp-reset { background: none; border: none; cursor: pointer; color: var(--mute);
               font: 700 10px Syne; letter-spacing: .07em; text-transform: uppercase; }
   .tp-reset:hover { color: var(--orange); }
+  .tp-cat { font: 700 10px Syne; letter-spacing: .08em; text-transform: uppercase;
+            color: var(--dim); padding: 12px 8px 4px; }
+  .tp-cat:first-of-type { padding-top: 4px; }
+  .tp-count { font: 600 10.5px Syne; color: var(--dim); padding: 0 8px 6px; }
+  .tp-count.at-cap { color: var(--accent, #F97316); }
+  .tp-item[disabled] { opacity: .35; cursor: not-allowed; }
+  .tp-item[disabled]:hover { background: none; color: var(--peri); }
   .tp-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
              background: none; border: none; cursor: pointer; padding: 7px 8px;
              border-radius: 8px; color: var(--peri); font: 600 12.5px Syne; }
@@ -1092,50 +1099,50 @@ const tps = v => v == null || isNaN(v) ? '—'
 const pct1 = v => v == null || !isFinite(v) ? '—' : v.toFixed(1) + '%';
 const num1 = v => v == null || !isFinite(v) ? '—' : v.toFixed(1);
 const TRENDS = [
-  { key: 'price_perf', compare: 'price_perf', noStack: true, /* rebased percentages */ title: 'Price Performance vs Peers', noSmooth: true,
+  { key: 'price_perf', cat: 'Markets', compare: 'price_perf', noStack: true, /* rebased percentages */ title: 'Price Performance vs Peers', noSmooth: true,
     color: '#14F195', fmt: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%', agg: 'last',
     series: PRICE_ASSETS, solKey: 'Solana', rebase: true,
     tip: '<b>In simple terms:</b> every asset starts at 0% on the left edge of whatever window you pick, so the lines show percentage gain or loss from that same starting point — the only fair way to compare a $77,000 coin with a $0.72 one.<br><br><b>Why it matters:</b> it answers whether SOL is outperforming the majors and its direct L1/L2 competitors over your chosen horizon, rather than just moving with the whole market. Data covers the last year (CoinGecko free tier).' },
-  { key: 'rev', compare: 'rev', title: 'Network Revenue', color: '#14F195', fmt: usd, agg: 'sum',
+  { key: 'rev', cat: 'Economics', compare: 'rev', title: 'Network Revenue', color: '#14F195', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> the total amount users actually pay to use a chain each day — fees, tips, and any other revenue the network itself collects.<br><br><b>Why it matters:</b> supply, TVL and transaction counts can all be inflated cheaply; revenue cannot, because someone has to part with real money. It is the cleanest read on genuine demand for blockspace. Source: Blockworks.' },
-  { key: 'app_revenue', compare: 'app_revenue', title: 'App Revenue', color: '#F5A524', fmt: usd, agg: 'sum',
+  { key: 'app_revenue', cat: 'Economics', compare: 'app_revenue', title: 'App Revenue', color: '#F5A524', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> what users pay the applications running on a chain — DEX fees, lending spreads, launchpad cuts — as opposed to what they pay the chain itself.<br><br><b>Why it matters:</b> read it against Network Revenue. That is the toll the network collects; this is the business built on top of it. A chain can carry cheap blockspace and still host enormous app businesses, and the ratio between the two is a fair read on where the value actually accrues. Source: DefiLlama.' },
-  { key: 'rev_share', compare: 'rev_share', noStack: true, /* percentages already summing to 100 */ title: 'Share of Cross-Chain Revenue', color: '#F97316', fmt: pct1, agg: 'mean',
+  { key: 'rev_share', cat: 'Economics', compare: 'rev_share', noStack: true, /* percentages already summing to 100 */ title: 'Share of Cross-Chain Revenue', color: '#F97316', fmt: pct1, agg: 'mean',
     tip: '<b>In simple terms:</b> of every dollar users spent on blockspace across these ten chains that day, this is the slice each one captured.<br><br><b>Why it matters:</b> absolute revenue rises and falls with the whole market, so share shows who is actually winning demand. A chain gaining share is taking real paying activity from the others.' },
-  { key: 'active_addresses', compare: 'active_addresses', title: 'Active Addresses', color: '#38BDF8', fmt: compact, agg: 'mean',
+  { key: 'active_addresses', cat: 'Activity', compare: 'active_addresses', title: 'Active Addresses', color: '#38BDF8', fmt: compact, agg: 'mean',
     tip: '<b>In simple terms:</b> how many distinct wallets transacted on each chain that day.<br><br><b>Why it matters:</b> the broadest measure of reach — how many people (and bots) actually show up. Read it next to REV: many addresses paying little means cheap, accessible activity; few addresses paying a lot means expensive blockspace.' },
-  { key: 'tx_per_address', compare: 'tx_per_address', noStack: true, /* a ratio, not a count */ title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
+  { key: 'tx_per_address', cat: 'Activity', compare: 'tx_per_address', noStack: true, /* a ratio, not a count */ title: 'Transactions per Active Address', color: '#A855F7', fmt: num1, agg: 'mean',
     tip: '<b>In simple terms:</b> successful transactions divided by active wallets — how intensively the average wallet uses a chain each day.<br><br><b>Why it matters:</b> it separates chains people visit from chains people <i>use</i>. A high number means wallets transacting repeatedly, the pattern behind trading, payments and apps rather than one-off transfers. Automated traders lift this on the busiest chains.' },
-  { key: 'ytd_transactions', compare: 'transactions', title: 'Transactions', color: '#38BDF8', fmt: compact, agg: 'sum',
+  { key: 'ytd_transactions', cat: 'Activity', compare: 'transactions', title: 'Transactions', color: '#38BDF8', fmt: compact, agg: 'sum',
     noteUnit: ' · Solana excludes vote transactions',
     tip: '<b>In simple terms:</b> how many transactions each chain settled.<br><br><b>Worth knowing:</b> Solana is counted without consensus votes, which its validators post as ordinary transactions. Including them would roughly treble the figure and would not be comparable with any other chain here. Source: Blockworks.' },
   // Average transactions per second: the bucket's MEAN daily count over 86,400.
   // Taking the mean (not the sum) keeps this correct at every aggregation
   // level, including a partial current week or month.
-  { key: 'tps_card', compare: 'transactions', title: 'Transactions per Second', noSmooth: true,
+  { key: 'tps_card', cat: 'Activity', compare: 'transactions', title: 'Transactions per Second', noSmooth: true,
     color: '#38BDF8', fmt: tps, agg: 'mean', perSecond: true,
     noteUnit: ' · average transactions per second · Solana excludes vote transactions',
     tip: '<b>In simple terms:</b> the average number of transactions each chain settles per second, worked out from its daily count.<br><br><b>Why it matters:</b> it is the plainest read on raw throughput — how much traffic a network actually carries, rather than how much it claims it could.<br><br><b>Worth knowing:</b> Solana is counted without consensus votes, which its validators post as ordinary transactions. Including them would roughly treble the figure and would not be comparable with any other chain here. Source: Blockworks.' },
-  { key: 'ytd_dex_volume',          compare: 'dex_volume',        title: 'Spot DEX Volume',   color: '#14F195', fmt: usd, agg: 'sum' },
-  { key: 'chain_fees', compare: 'chain_fees', title: 'Chain Fees', color: '#FBBF24', fmt: usd, agg: 'sum',
+  { key: 'ytd_dex_volume', cat: 'Trading',          compare: 'dex_volume',        title: 'Spot DEX Volume',   color: '#14F195', fmt: usd, agg: 'sum' },
+  { key: 'chain_fees', cat: 'Economics', compare: 'chain_fees', title: 'Chain Fees', color: '#FBBF24', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> everything users pay the network itself in a day — the gas, priority fees and tips that go to validators or get burned, before any app takes its cut.<br><br><b>Why it matters:</b> this is the chain\u2019s own top line. Read it against Chain Revenue to see how much the network keeps rather than passes through, and against App Fees to see whether the value sits in the rails or in what is built on them. Source: DefiLlama.' },
-  { key: 'chain_revenue', compare: 'chain_revenue', title: 'Chain Revenue', color: '#FB7185', fmt: usd, agg: 'sum',
+  { key: 'chain_revenue', cat: 'Economics', compare: 'chain_revenue', title: 'Chain Revenue', color: '#FB7185', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> the slice of chain fees the network actually retains \u2014 on most chains the base fee that is burned or paid out, rather than the whole toll.<br><br><b>Why it matters:</b> fees measure activity, revenue measures capture. A chain can collect a great deal and keep very little of it, and the gap between the two lines is exactly that story. Source: DefiLlama.' },
-  { key: 'app_fees', compare: 'app_fees', title: 'App Fees', color: '#C084FC', fmt: usd, agg: 'sum',
+  { key: 'app_fees', cat: 'Economics', compare: 'app_fees', title: 'App Fees', color: '#C084FC', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> the gross amount users pay the applications on a chain \u2014 every DEX swap fee, lending spread and launchpad cut added up, before the apps share any of it back.<br><br><b>Why it matters:</b> App Revenue is what those businesses keep; this is what passes through them. The ratio between the two shows how much of the economy is rebated to liquidity providers and users rather than retained. Source: DefiLlama.' },
-  { key: 'rwa_aum', compare: 'rwa_aum', title: 'RWA Active AUM', color: '#2DD4BF', fmt: usd, agg: 'last',
+  { key: 'rwa_aum', cat: 'Markets', compare: 'rwa_aum', title: 'RWA Active AUM', color: '#2DD4BF', fmt: usd, agg: 'last',
     tip: '<b>In simple terms:</b> the value of real-world assets \u2014 treasuries, credit, commodities, equities \u2014 held onchain on each chain.<br><br><b>Why it matters:</b> RWAs are the clearest measure of institutional money actually settling onchain rather than trading crypto natively. It is a level, not a flow, so the line shows the stock of assets custodied on each chain. Source: DefiLlama.' },
-  { key: 'perps_volume', compare: 'perps_volume', title: 'Perps Volume', color: '#22D3EE', fmt: usd, agg: 'sum',
+  { key: 'perps_volume', cat: 'Trading', compare: 'perps_volume', title: 'Perps Volume', color: '#22D3EE', fmt: usd, agg: 'sum',
     tip: '<b>In simple terms:</b> the notional value of perpetual-futures trades settled on each chain — leveraged bets on price, rather than spot swaps of the asset itself.<br><br><b>Why it matters:</b> perps are where most crypto trading volume actually lives, and they concentrate on whichever chain offers the fastest, cheapest execution. Read it next to Spot DEX Volume: a chain can be quiet on spot and still be a major venue, or the reverse. Source: DefiLlama.' },
-  { key: 'stablecoin_supply',       compare: 'stablecoin_supply', title: 'Stablecoin Supply', color: '#E9469A', fmt: usd, agg: 'last' },
-  { key: 'defi_tvl',                compare: 'defi_tvl',          title: 'DeFi TVL',          color: '#4ADE80', fmt: usd, agg: 'last' },
-  { key: 'tokenized_equity_volume', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd, agg: 'sum' },
-  { key: 'fsr_card', compare: 'fsr', noStack: true, /* a ratio */ title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact, agg: 'mean',
+  { key: 'stablecoin_supply', cat: 'Markets',       compare: 'stablecoin_supply', title: 'Stablecoin Supply', color: '#E9469A', fmt: usd, agg: 'last' },
+  { key: 'defi_tvl', cat: 'Trading',                compare: 'defi_tvl',          title: 'DeFi TVL',          color: '#4ADE80', fmt: usd, agg: 'last' },
+  { key: 'tokenized_equity_volume', cat: 'Markets', compare: 'tokenized_equity_volume', title: 'Tokenized Equity Volume', color: '#6366F1', fmt: usd, agg: 'sum' },
+  { key: 'fsr_card', cat: 'Fee quality', compare: 'fsr', noStack: true, /* a ratio */ title: 'Fee Stability Ratio (FSR)', color: '#F97316', fmt: compact, agg: 'mean',
     tip: '<b>Fee Stability Ratio (FSR)</b> is a metric introduced by DeFi Development Corp (DFDV) to evaluate how affordable and reliable a network&rsquo;s transaction costs are.<br><br><b>How it&rsquo;s calculated:</b> FSR = 1 &divide; (median fee &times; median-fee volatility), where volatility is the 30-day rolling standard deviation of the chain&rsquo;s daily median fee in USD.<br><br><b>How to read it:</b> higher FSR means structurally low and stable fees; lower FSR means high, volatile, or unpredictable fee spikes.' },
-  { key: 'fee_median_card', compare: 'fee_median', noStack: true, /* medians do not add */ title: 'Median Transaction Fee', color: '#EAB308',
+  { key: 'fee_median_card', cat: 'Fee quality', compare: 'fee_median', noStack: true, /* medians do not add */ title: 'Median Transaction Fee', color: '#EAB308',
     fmt: feeUsd, agg: 'mean',
     tip: '<b>In simple terms:</b> what the middle transaction costs that day — half cost less, half cost more. The median is used rather than the average so a handful of enormous transactions cannot skew it.<br><br><b>Why it matters:</b> this is the number a normal user actually feels. Cheap, predictable fees are what let payments, gaming and high-frequency apps work at all.' },
-  { key: 'fee_vol_card', compare: 'fee_vol', noStack: true, /* a volatility measure */ title: 'Median Fee Volatility', color: '#EF4444',
+  { key: 'fee_vol_card', cat: 'Fee quality', compare: 'fee_vol', noStack: true, /* a volatility measure */ title: 'Median Fee Volatility', color: '#EF4444',
     fmt: feeUsd, agg: 'mean',
     tip: '<b>In simple terms:</b> how much the median fee swings around — the 30-day rolling standard deviation of a chain&rsquo;s daily median fee, in dollars.<br><br><b>Why it matters:</b> a low fee is only useful if it stays low. High volatility means costs spike without warning, which is what makes budgeting for on-chain activity difficult.' },
 ];
@@ -1297,7 +1304,8 @@ function pickedTrends() {
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(TREND_STORE) || 'null'); } catch { /* private mode */ }
     const valid = Array.isArray(saved) ? saved.filter(k => TRENDS.some(t => t.key === k)) : [];
-    trendPicked = valid.length ? valid : [...TREND_DEFAULT];
+    // A selection saved before the cap existed could be longer than it.
+    trendPicked = (valid.length ? valid : [...TREND_DEFAULT]).slice(0, TREND_MAX);
   }
   return trendPicked;
 }
@@ -1309,27 +1317,65 @@ function setPicked(keys) {
   buildTrends();
 }
 
+/* Ten is the most the grid shows at once. Past that the page stops being a
+   dashboard and becomes a scroll — the cards below the fold are no longer
+   compared with anything, they are just queued. The cap is a display limit,
+   not a limit on what is tracked: everything stays in the picker. */
+const TREND_MAX = 10;
+const TREND_CATS = ['Markets', 'Activity', 'Trading', 'Economics', 'Fee quality'];
+
 function renderTrendPicker() {
   const box = $('trendPicker');
   if (!box) return;
   const picked = pickedTrends();
+  const full = picked.length >= TREND_MAX;
   box.textContent = '';
-  for (const t of TRENDS_AZ) {
-    if (!state.trendCompare?.[t.compare] && !state.trendSeries?.[t.key]) continue;
-    const on = picked.includes(t.key);
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'tp-item';
-    b.setAttribute('aria-pressed', String(on));
-    const dot = document.createElement('span');
-    dot.className = 'tp-dot';
-    dot.style.color = t.color;
-    b.append(dot, document.createTextNode(t.title));
-    b.addEventListener('click', () => {
-      const next = on ? picked.filter(k => k !== t.key) : [...picked, t.key];
-      if (next.length) setPicked(next);   // never leave the grid empty
-    });
-    box.appendChild(b);
+
+  const count = document.createElement('div');
+  count.className = 'tp-count';
+  count.textContent = `${picked.length} of ${TREND_MAX} shown`;
+  if (full) count.classList.add('at-cap');
+  box.appendChild(count);
+
+  // Grouped under plain headings rather than collapsible sections: with five
+  // short groups, a disclosure arrow is one more click to see what is already
+  // only a screen's worth of names.
+  const avail = TRENDS_AZ.filter(t =>
+    state.trendCompare?.[t.compare] || state.trendSeries?.[t.key]);
+  const seen = new Set();
+  const groups = TREND_CATS.map(c => [c, avail.filter(t => t.cat === c)])
+    .concat([['Other', avail.filter(t => !TREND_CATS.includes(t.cat))]])
+    .filter(([, items]) => items.length);
+
+  for (const [cat, items] of groups) {
+    const h = document.createElement('div');
+    h.className = 'tp-cat';
+    h.textContent = cat;
+    box.appendChild(h);
+    for (const t of items) {
+      if (seen.has(t.key)) continue;
+      seen.add(t.key);
+      const on = picked.includes(t.key);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tp-item';
+      b.setAttribute('aria-pressed', String(on));
+      // At the cap, the unpicked are shown but inert — hiding them would make
+      // the list jump about as things are toggled.
+      if (!on && full) {
+        b.disabled = true;
+        b.title = `Showing the maximum of ${TREND_MAX}. Remove one to add another.`;
+      }
+      const dot = document.createElement('span');
+      dot.className = 'tp-dot';
+      dot.style.color = t.color;
+      b.append(dot, document.createTextNode(t.title));
+      b.addEventListener('click', () => {
+        const next = on ? picked.filter(k => k !== t.key) : [...picked, t.key];
+        if (next.length && next.length <= TREND_MAX) setPicked(next);
+      });
+      box.appendChild(b);
+    }
   }
 }
 
