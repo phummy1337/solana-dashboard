@@ -474,9 +474,16 @@
   .tp-reset { background: none; border: none; cursor: pointer; color: var(--mute);
               font: 700 10px Syne; letter-spacing: .07em; text-transform: uppercase; }
   .tp-reset:hover { color: var(--orange); }
-  .tp-cat { font: 700 10px Syne; letter-spacing: .08em; text-transform: uppercase;
+  .tp-cat { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+            background: none; border: 0; cursor: pointer;
+            font: 700 10px Syne; letter-spacing: .08em; text-transform: uppercase;
             color: var(--dim); padding: 12px 8px 4px; }
+  .tp-cat:hover { color: var(--peri); }
   .tp-cat:first-of-type { padding-top: 4px; }
+  .tp-caret { display: inline-block; transition: transform .12s; font-size: 9px; }
+  .tp-cat[aria-expanded="true"] .tp-caret { transform: rotate(90deg); }
+  .tp-badge { margin-left: auto; font-size: 9px; color: var(--accent, #F97316);
+              opacity: .9; letter-spacing: 0; }
   .tp-count { font: 600 10.5px Syne; color: var(--dim); padding: 0 8px 6px; }
   .tp-count.at-cap { color: var(--accent, #F97316); }
   .tp-item[disabled] { opacity: .35; cursor: not-allowed; }
@@ -1322,6 +1329,11 @@ function setPicked(keys) {
    compared with anything, they are just queued. The cap is a display limit,
    not a limit on what is tracked: everything stays in the picker. */
 const TREND_MAX = 10;
+const TREND_OPEN = 'sos.trendOpen';
+function trendOpen() {
+  try { return JSON.parse(localStorage.getItem(TREND_OPEN) || '{}') || {}; }
+  catch { return {}; }
+}
 const TREND_CATS = ['Markets', 'Activity', 'Trading', 'Economics', 'Fee quality'];
 
 function renderTrendPicker() {
@@ -1348,10 +1360,36 @@ function renderTrendPicker() {
     .filter(([, items]) => items.length);
 
   for (const [cat, items] of groups) {
-    const h = document.createElement('div');
+    // Open if the reader has said so before, else open only when the group
+    // holds something currently on the grid — so the list opens showing what
+    // is live rather than everything that exists.
+    const saved = trendOpen()[cat];
+    const open = saved === undefined ? items.some(t => picked.includes(t.key)) : saved;
+
+    const h = document.createElement('button');
+    h.type = 'button';
     h.className = 'tp-cat';
-    h.textContent = cat;
+    h.setAttribute('aria-expanded', String(open));
+    const caret = document.createElement('span');
+    caret.className = 'tp-caret';
+    caret.textContent = '▸';
+    const n = items.filter(t => picked.includes(t.key)).length;
+    h.append(caret, document.createTextNode(cat));
+    if (n) {
+      const badge = document.createElement('span');
+      badge.className = 'tp-badge';
+      badge.textContent = String(n);
+      h.appendChild(badge);
+    }
+    h.addEventListener('click', () => {
+      const o = trendOpen();
+      o[cat] = !open;
+      try { localStorage.setItem(TREND_OPEN, JSON.stringify(o)); } catch { /* private mode */ }
+      renderTrendPicker();
+    });
     box.appendChild(h);
+    if (!open) continue;
+
     for (const t of items) {
       if (seen.has(t.key)) continue;
       seen.add(t.key);
@@ -1360,19 +1398,20 @@ function renderTrendPicker() {
       b.type = 'button';
       b.className = 'tp-item';
       b.setAttribute('aria-pressed', String(on));
-      // At the cap, the unpicked are shown but inert — hiding them would make
-      // the list jump about as things are toggled.
       if (!on && full) {
-        b.disabled = true;
-        b.title = `Showing the maximum of ${TREND_MAX}. Remove one to add another.`;
+        b.title = `At ${TREND_MAX} of ${TREND_MAX} — adding this drops the oldest.`;
       }
       const dot = document.createElement('span');
       dot.className = 'tp-dot';
       dot.style.color = t.color;
       b.append(dot, document.createTextNode(t.title));
       b.addEventListener('click', () => {
-        const next = on ? picked.filter(k => k !== t.key) : [...picked, t.key];
-        if (next.length && next.length <= TREND_MAX) setPicked(next);
+        // At the cap, adding drops the oldest pick rather than refusing. The
+        // list is kept in selection order, so "first" is the one that has been
+        // on screen longest — the one you are least likely to still be reading.
+        let next = on ? picked.filter(k => k !== t.key) : [...picked, t.key];
+        if (next.length > TREND_MAX) next = next.slice(next.length - TREND_MAX);
+        if (next.length) setPicked(next);
       });
       box.appendChild(b);
     }
