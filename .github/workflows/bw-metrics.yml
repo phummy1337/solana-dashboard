@@ -13,8 +13,13 @@ on:
       match:
         description: "Case-insensitive substring to match against slug or title"
         type: string
-        required: true
+        required: false
         default: "meme"
+      chart:
+        description: "Chart id to describe (columns and date range only, no values)"
+        type: string
+        required: false
+        default: ""
 
 jobs:
   list:
@@ -24,12 +29,44 @@ jobs:
         env:
           BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
           MATCH: ${{ github.event.inputs.match }}
+          CHART: ${{ github.event.inputs.chart }}
         run: |
           python3 - <<'PY'
           import json, os, urllib.request, urllib.parse
 
           key = os.environ["BLOCKWORKS_API_KEY"]
-          want = os.environ["MATCH"].lower()
+          want = (os.environ.get("MATCH") or "").lower()
+
+          def fetch(path):
+              req = urllib.request.Request(
+                  f"https://api.blockworks.com/{path}",
+                  headers={"x-api-key": key,
+                           "User-Agent": "solana-dashboard/1.0 (+metrics-catalogue)"})
+              return json.load(urllib.request.urlopen(req, timeout=60))
+
+          # Describing a chart: shape only -- column names, row count, date span.
+          # No values are printed; this repo's Actions logs are public and the
+          # data is licensed.
+          chart_id = (os.environ.get("CHART") or "").strip()
+          if chart_id:
+              d = fetch(f"v1/charts/{chart_id}/data?limit=2000&page=1")
+              rows = d.get("data") or []
+              print(f"chart {chart_id}: {d.get('total', '?')} rows total, "
+                    f"{len(rows)} in page 1")
+              if rows:
+                  print("columns:", sorted(rows[0].keys()))
+                  dates = [r.get("date") or r.get("dt") or r.get("block_date")
+                           for r in rows]
+                  dates = [x for x in dates if x]
+                  if dates:
+                      print(f"date span: {min(dates)[:10]} -> {max(dates)[:10]}")
+                  # distinct values of any obvious dimension column
+                  for col in ("chain", "blockchain", "project", "name", "label"):
+                      vals = {r.get(col) for r in rows if r.get(col)}
+                      if vals:
+                          print(f"{col}: {len(vals)} distinct -> "
+                                + ", ".join(sorted(map(str, vals))[:14]))
+              raise SystemExit(0)
 
           # The catalogue pages at 100; walk it rather than judging from page one.
           rows, page = [], 1
