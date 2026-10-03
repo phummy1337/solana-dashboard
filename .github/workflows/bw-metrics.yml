@@ -54,7 +54,15 @@ jobs:
               print(f"chart {chart_id}: {d.get('total', '?')} rows total, "
                     f"{len(rows)} in page 1")
               if rows:
-                  print("columns:", sorted(rows[0].keys()))
+                  # Union across rows, and the newest row separately: these
+                  # tables carry only the keys a row has data for, so reading
+                  # row 0 (2021) hides every column a chain earned later.
+                  allk = set()
+                  for r in rows:
+                      allk |= set(r.keys())
+                  newest = max(rows, key=lambda r: str(r.get("dt") or r.get("date") or ""))
+                  print("columns (union):", sorted(allk))
+                  print("columns (newest row):", sorted(newest.keys()))
                   dates = [r.get("date") or r.get("dt") or r.get("block_date")
                            for r in rows]
                   dates = [x for x in dates if x]
