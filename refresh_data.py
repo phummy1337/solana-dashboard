@@ -341,15 +341,19 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             warn(f"spot price fallback: {e}")
 
-    # 24h return from the rolling-24h OHLCV open vs the live spot quote.
+    # 24h return, from Coinbase's own rolling-24h open rather than a metered
+    # Blockworks call to v1/assets/solana/ohlcv. It has to stay a rolling
+    # window — the tile reads "vs 24 hours ago", and measuring against
+    # yesterday's close instead would quietly answer a different question.
+    # Same venue as the spot quote above, so the two cannot disagree.
     try:
-        o = bw("v1/assets/solana/ohlcv")
-        cur = spot or o.get("close")
-        if o.get("open") and cur:
-            stats["return_24h"] = (cur / o["open"] - 1) * 100
+        st = get("https://api.exchange.coinbase.com/products/SOL-USD/stats")
+        o, last = float(st.get("open") or 0), spot or float(st.get("last") or 0)
+        if o and last:
+            stats["return_24h"] = (last / o - 1) * 100
             print(f"  24h return: {stats['return_24h']:+.2f}%")
     except Exception as e:  # noqa: BLE001
-        warn(f"ohlcv 24h: {e}")
+        warn(f"24h return (Coinbase): {e}")
     # CoinGecko hands back a 24h change with the quote, which is the same
     # measure the tile wants and the only one available when Blockworks is out.
     if stats.get("return_24h") is None and cg_24h is not None:
@@ -377,6 +381,46 @@ def main() -> int:
             stats[k] = ((current / base) - 1) * 100 if base else None
             if base is None:
                 warn(f"{k}: no baseline price found")
+
+    # ---------------------------------------------- Blockworks call budgeting
+    # The allowance is credits, not requests: x-usage-limit is 2,500 a month
+    # against an x-ratelimit of a million, and it was the 2,500 that ran out in
+    # September. The cron fires four times a day because Blockworks publishes
+    # the previous UTC day anywhere between 08:00 and 19:00 — but once that day
+    # has landed, the next three passes were re-fetching settled history for
+    # nothing. Every Blockworks block now checks first.
+    #
+    # Same shape as the DefiLlama skip further down, which took that source from
+    # ~1,440 calls a month to ~360 without changing a published number.
+    bw_yesterday = (date.today() - timedelta(days=1)).isoformat()
+    bw_skipped: list[str] = []
+
+    def bw_current(where: str, key: str) -> bool:
+        """True when what we already published runs to yesterday or later."""
+        blk = (prev_all.get(where) or {}).get(key)
+        if isinstance(blk, dict):
+            newest = max((pts[-1]["d"] for pts in blk.values()
+                          if isinstance(pts, list) and pts), default="")
+        elif isinstance(blk, list) and blk and isinstance(blk[-1], dict):
+            newest = blk[-1].get("d", "")
+        else:
+            return False
+        return newest >= bw_yesterday
+
+    def bw_reuse(where: str, key: str, label: str) -> bool:
+        """Carry the published block forward and skip the call.
+
+        Copies rather than leaving the block empty: the catch-all carry at the
+        end of the run warns when a series vanishes, and a deliberate skip
+        should not look like a failed fetch.
+        """
+        if not bw_current(where, key):
+            return False
+        blk = (prev_all.get(where) or {}).get(key)
+        (compare if where == "compare" else data["series"])[key] = blk
+        bw_skipped.append(label)
+        print(f"  {label}: already through {bw_yesterday} — skipped")
+        return True
 
     # ------------------------------------------------------- network volume
     def sum_metric(slug: str, key: str, also_series: bool = False) -> dict[str, float]:
@@ -473,82 +517,86 @@ def main() -> int:
     # -------------------------------------------------------- active traders
     # Full history for the trend chart's longer ranges; stats stay YTD.
     series_since = f"{YEAR - 5}-01-01"
-    try:
-        rows = chart_rows(CHARTS["traders"][0])
-        vals = {}
-        for r in rows:
-            d = row_date(r)
-            if d and r.get("unique_traders") is not None:
-                vals[d] = r["unique_traders"]
-        y = ytd(vals)
-        if y:
-            stats["avg_daily_traders_ytd"] = sum(y.values()) / len(y)
-            daily["traders"] = vals[max(vals)]
-            print(f"  avg daily traders YTD: {stats['avg_daily_traders_ytd']:,.0f} over {len(y)} days")
-        if vals:
-            data["series"]["traders"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
-    except Exception as e:  # noqa: BLE001
-        warn(f"daily active traders chart: {e}")
+    if not bw_reuse("series", "traders", "traders"):
+        try:
+            rows = chart_rows(CHARTS["traders"][0])
+            vals = {}
+            for r in rows:
+                d = row_date(r)
+                if d and r.get("unique_traders") is not None:
+                    vals[d] = r["unique_traders"]
+            y = ytd(vals)
+            if y:
+                stats["avg_daily_traders_ytd"] = sum(y.values()) / len(y)
+                daily["traders"] = vals[max(vals)]
+                print(f"  avg daily traders YTD: {stats['avg_daily_traders_ytd']:,.0f} over {len(y)} days")
+            if vals:
+                data["series"]["traders"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
+        except Exception as e:  # noqa: BLE001
+            warn(f"daily active traders chart: {e}")
 
     # ----------------------------------------------------------- perps volume
-    try:
-        rows = chart_rows(CHARTS["perps"][0])
-        # The series carries one row per symbol plus a rolled-up "Total" row;
-        # summing everything would double count.
-        vals = {}
-        for r in rows:
-            d = row_date(r)
-            if d and r.get("symbol") == "Total" and r.get("vol_totals") is not None:
-                vals[d] = r["vol_totals"]
-        y = ytd(vals)
-        if y:
-            stats["ytd_perps_volume"] = sum(y.values())
-            stats["ytd_perps_days"] = len(y)
-            daily["perps_volume"] = vals[max(vals)]
-            print(f"  YTD perps volume: ${stats['ytd_perps_volume']:,.0f} over {len(y)} days")
-        else:
-            warn("perps chart: no rows with symbol='Total' in YTD range")
-        if vals:
-            data["series"]["perps"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
-    except Exception as e:  # noqa: BLE001
-        warn(f"perps chart: {e}")
+    if not bw_reuse("series", "perps", "perps"):
+        try:
+            rows = chart_rows(CHARTS["perps"][0])
+            # The series carries one row per symbol plus a rolled-up "Total" row;
+            # summing everything would double count.
+            vals = {}
+            for r in rows:
+                d = row_date(r)
+                if d and r.get("symbol") == "Total" and r.get("vol_totals") is not None:
+                    vals[d] = r["vol_totals"]
+            y = ytd(vals)
+            if y:
+                stats["ytd_perps_volume"] = sum(y.values())
+                stats["ytd_perps_days"] = len(y)
+                daily["perps_volume"] = vals[max(vals)]
+                print(f"  YTD perps volume: ${stats['ytd_perps_volume']:,.0f} over {len(y)} days")
+            else:
+                warn("perps chart: no rows with symbol='Total' in YTD range")
+            if vals:
+                data["series"]["perps"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
+        except Exception as e:  # noqa: BLE001
+            warn(f"perps chart: {e}")
 
     # ------------------------------------------------------ tokenized equity
-    try:
-        rows = chart_rows(CHARTS["tokeq_vol"][0])
-        vals: dict[str, float] = {}
-        for r in rows:
-            d = row_date(r)
-            if d and r.get("volume_usd") is not None:
-                # Rows are per-issuer, so accumulate rather than assign.
-                vals[d] = vals.get(d, 0) + r["volume_usd"]
-        y = ytd(vals)
-        if y:
-            stats["ytd_tokenized_equity_volume"] = sum(y.values())
-            daily["tokenized_equity_volume"] = vals[max(vals)]
-            print(f"  YTD tokenized equity volume: ${stats['ytd_tokenized_equity_volume']:,.0f}")
-        if vals:
-            data["series"]["tokenized_equity_volume"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
-    except Exception as e:  # noqa: BLE001
-        warn(f"tokenized equity volume chart: {e}")
+    if not bw_reuse("series", "tokenized_equity_volume", "tokenized equity volume"):
+        try:
+            rows = chart_rows(CHARTS["tokeq_vol"][0])
+            vals: dict[str, float] = {}
+            for r in rows:
+                d = row_date(r)
+                if d and r.get("volume_usd") is not None:
+                    # Rows are per-issuer, so accumulate rather than assign.
+                    vals[d] = vals.get(d, 0) + r["volume_usd"]
+            y = ytd(vals)
+            if y:
+                stats["ytd_tokenized_equity_volume"] = sum(y.values())
+                daily["tokenized_equity_volume"] = vals[max(vals)]
+                print(f"  YTD tokenized equity volume: ${stats['ytd_tokenized_equity_volume']:,.0f}")
+            if vals:
+                data["series"]["tokenized_equity_volume"] = [{"d": d, "v": v} for d, v in sorted(vals.items()) if d >= series_since]
+        except Exception as e:  # noqa: BLE001
+            warn(f"tokenized equity volume chart: {e}")
 
-    try:
-        rows = chart_rows(CHARTS["tokeq_sup"][0])
-        supply = {}
-        for r in rows:
-            d = row_date(r)
-            v = r.get("circulating_supply_usd")
-            if d and v is not None:
-                supply[d] = v
-        if supply:
-            stats["tokenized_equity_supply"] = supply[max(supply)]
-            stats["tokenized_equity_as_of"] = max(supply)
-            data["series"]["tokenized_equity_supply"] = [{"d": d, "v": v} for d, v in sorted(supply.items())]
-            print(f"  tokenized equity supply: ${stats['tokenized_equity_supply']:,.0f} ({max(supply)})")
-        else:
-            warn("tokenized equity supply chart: all values null")
-    except Exception as e:  # noqa: BLE001
-        warn(f"tokenized equity supply chart: {e}")
+    if not bw_reuse("series", "tokenized_equity_supply", "tokenized equity supply"):
+        try:
+            rows = chart_rows(CHARTS["tokeq_sup"][0])
+            supply = {}
+            for r in rows:
+                d = row_date(r)
+                v = r.get("circulating_supply_usd")
+                if d and v is not None:
+                    supply[d] = v
+            if supply:
+                stats["tokenized_equity_supply"] = supply[max(supply)]
+                stats["tokenized_equity_as_of"] = max(supply)
+                data["series"]["tokenized_equity_supply"] = [{"d": d, "v": v} for d, v in sorted(supply.items())]
+                print(f"  tokenized equity supply: ${stats['tokenized_equity_supply']:,.0f} ({max(supply)})")
+            else:
+                warn("tokenized equity supply chart: all values null")
+        except Exception as e:  # noqa: BLE001
+            warn(f"tokenized equity supply chart: {e}")
 
     # ------------------------------------------------- cross-chain comparisons
     # Multi-project series for the trend charts. Kept separate from "series"
@@ -568,6 +616,8 @@ def main() -> int:
     prev_compare: dict = prev_all.get("compare") or {}
 
     def compare_metric(slug: str, key: str, chains: list[str]) -> None:
+        if bw_reuse("compare", key, f"compare {slug}"):
+            return
         try:
             d = bw(f"v1/metrics/{slug}", project=",".join(chains))
             out = {}
@@ -860,68 +910,76 @@ def main() -> int:
     # Tron is excluded — its median fee is 0 (bandwidth model), so FSR blows up.
     # Avalanche is excluded per Pete: not a comparison he wants on this card.
     FEE_CHAINS = [c for c in CHAINS_ALL if c not in ("tron", "avalanche")]
-    try:
-        d = bw("v1/metrics/transaction-fee-med-usd", project=",".join(FEE_CHAINS))
-        fee_out: dict = {}
-        vol_out: dict = {}
-        fsr_out: dict = {}
-        for chain in FEE_CHAINS:
-            rows = sorted((r for r in (d.get(chain) or []) if r.get("value") is not None),
-                          key=lambda r: r["date"])
-            vals = [r["value"] for r in rows]
-            fees, vols, fsrs = [], [], []
-            for i, r in enumerate(rows):
-                if r["date"] < since:
-                    continue
-                w = vals[max(0, i - 29):i + 1]
-                m = sum(w) / len(w)
-                sd = (sum((x - m) ** 2 for x in w) / len(w)) ** 0.5
-                fees.append({"d": r["date"], "v": vals[i]})
-                if sd > 0:
-                    vols.append({"d": r["date"], "v": sd})
-                    if vals[i] > 0:
-                        fsrs.append({"d": r["date"], "v": 1 / (vals[i] * sd)})
-            if fees:
-                fee_out[chain] = fees
-            if vols:
-                vol_out[chain] = vols
-            if fsrs:
-                fsr_out[chain] = fsrs
-        if fsr_out:
-            compare["fee_median"] = fee_out
-            compare["fee_vol"] = vol_out
-            compare["fsr"] = fsr_out
-            print("  compare fee/FSR: " + ", ".join(f"{c}:{len(v)}" for c, v in fsr_out.items()))
-    except Exception as e:  # noqa: BLE001
-        warn(f"fee stability: {e}")
+    # One call feeds three cards, so the whole block is guarded together.
+    if all(bw_current("compare", k) for k in ("fee_median", "fee_vol", "fsr")):
+        for k in ("fee_median", "fee_vol", "fsr"):
+            compare[k] = (prev_all.get("compare") or {})[k]
+        bw_skipped.append("fee median/vol/FSR")
+        print(f"  fee median/vol/FSR: already through {bw_yesterday} — skipped")
+    else:
+        try:
+            d = bw("v1/metrics/transaction-fee-med-usd", project=",".join(FEE_CHAINS))
+            fee_out: dict = {}
+            vol_out: dict = {}
+            fsr_out: dict = {}
+            for chain in FEE_CHAINS:
+                rows = sorted((r for r in (d.get(chain) or []) if r.get("value") is not None),
+                              key=lambda r: r["date"])
+                vals = [r["value"] for r in rows]
+                fees, vols, fsrs = [], [], []
+                for i, r in enumerate(rows):
+                    if r["date"] < since:
+                        continue
+                    w = vals[max(0, i - 29):i + 1]
+                    m = sum(w) / len(w)
+                    sd = (sum((x - m) ** 2 for x in w) / len(w)) ** 0.5
+                    fees.append({"d": r["date"], "v": vals[i]})
+                    if sd > 0:
+                        vols.append({"d": r["date"], "v": sd})
+                        if vals[i] > 0:
+                            fsrs.append({"d": r["date"], "v": 1 / (vals[i] * sd)})
+                if fees:
+                    fee_out[chain] = fees
+                if vols:
+                    vol_out[chain] = vols
+                if fsrs:
+                    fsr_out[chain] = fsrs
+            if fsr_out:
+                compare["fee_median"] = fee_out
+                compare["fee_vol"] = vol_out
+                compare["fsr"] = fsr_out
+                print("  compare fee/FSR: " + ", ".join(f"{c}:{len(v)}" for c, v in fsr_out.items()))
+        except Exception as e:  # noqa: BLE001
+            warn(f"fee stability: {e}")
 
     # Tokenized-asset volume by blockchain (chart 6874). Equities-only isn't
     # broken out for most of the history, so approximate it as total tokenized
     # asset volume minus the commodities category where that's reported.
-    try:
-        rows = chart_rows(CHARTS["tokeq_chain"][0])
-        chain_map = {"solana": "solana", "ethereum": "ethereum", "base": "base",
-                     "arbitrum": "arbitrum", "bnb": "bnb", "bsc": "bnb",
-                     "avalanche": "avalanche", "sui": "sui", "tron": "tron",
-                     "hyperevm": "hyperevm", "polygon": "polygon"}
-        by: dict = {}
-        for r in rows:
-            d0 = row_date(r)
-            ch = chain_map.get((r.get("blockchain") or "").lower())
-            v = r.get("tokenizedasset_volume_usd")
-            if not d0 or not ch or v is None:
-                continue
-            v = max(0, v - (r.get("category_commodities_volume_usd") or 0))
-            by.setdefault(ch, {})
-            by[ch][d0] = by[ch].get(d0, 0) + v
-        out = {c: [{"d": d0, "v": v} for d0, v in sorted(pts.items()) if d0 >= since]
-               for c, pts in by.items()}
-        out = {c: p for c, p in out.items() if p}
-        if out:
-            compare["tokenized_equity_volume"] = out
-            print("  compare tokenized-equity: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
-    except Exception as e:  # noqa: BLE001
-        warn(f"compare tokenized equity chart: {e}")
+    if not bw_reuse("compare", "tokenized_equity_volume", "tokenized equity by chain"):
+        try:
+            rows = chart_rows(CHARTS["tokeq_chain"][0])
+            chain_map = {"solana": "solana", "ethereum": "ethereum", "base": "base",
+                         "arbitrum": "arbitrum", "bnb": "bnb", "bsc": "bnb",
+                         "avalanche": "avalanche", "sui": "sui", "tron": "tron",
+                         "hyperevm": "hyperevm", "polygon": "polygon"}
+            by: dict = {}
+            for r in rows:
+                d0 = row_date(r)
+                ch = chain_map.get((r.get("blockchain") or "").lower())
+                v = r.get("tokenizedasset_volume_usd")
+                if not d0 or not ch or v is None:
+                    continue
+                v = max(0, v - (r.get("category_commodities_volume_usd") or 0))
+                by.setdefault(ch, {})
+                by[ch][d0] = by[ch].get(d0, 0) + v
+            out = {c: [{"d": d0, "v": v} for d0, v in sorted(pts.items()) if d0 >= since]
+                   for c, pts in by.items()}
+            out = {c: p for c, p in out.items() if p}
+            if out:
+                compare["tokenized_equity_volume"] = out
+                print("  compare tokenized-equity: " + ", ".join(f"{c}:{len(v)}" for c, v in out.items()))
+        except Exception as e:  # noqa: BLE001
+            warn(f"compare tokenized equity chart: {e}")
 
     # --------------------------------------------------- app revenue (DefiLlama)
     # Revenue earned by the applications running on a chain, which is a
@@ -1500,6 +1558,10 @@ def main() -> int:
                       f"(avg TPS {stats.get('avg_tps_ytd', 0):,.0f})")
     except Exception as e:  # noqa: BLE001 - a bad backfill must not stop the run
         warn(f"blockworks backfill: {e}")
+
+    if bw_skipped:
+        print(f"  Blockworks: skipped {len(bw_skipped)} already-current block(s) "
+              f"— {', '.join(bw_skipped)}")
 
     data["compare"] = compare
 
