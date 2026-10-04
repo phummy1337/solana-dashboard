@@ -474,6 +474,9 @@
   .tp-reset { background: none; border: none; cursor: pointer; color: var(--mute);
               font: 700 10px Syne; letter-spacing: .07em; text-transform: uppercase; }
   .tp-reset:hover { color: var(--orange); }
+  .gset { margin-left: auto; }
+  .gset .ctl-label { white-space: nowrap; }
+  @media (max-width: 760px) { .gset { margin-left: 0; width: 100%; } }
   .ushipped-bar { padding-top: 18px; padding-bottom: 0; display: block; }
   .ushipped-head { display: flex; align-items: center; gap: 7px;
                    background: none; border: 0; cursor: pointer; padding: 6px 0;
@@ -647,6 +650,15 @@
 <div class="shead">
   <h2>Cross-Chain Trends</h2>
   <span class="rule"></span>
+  <span class="trend-ctl small gset">
+    <span class="ctl-label">All charts</span>
+    <select class="rsel" id="gRange" aria-label="Set the time period on every chart">
+      <option value="">Range…</option>
+    </select>
+    <select class="rsel" id="gAgg" aria-label="Set the interval on every chart">
+      <option value="">Interval…</option>
+    </select>
+  </span>
 </div>
 <div class="trend-shell">
   <aside class="trend-picker">
@@ -832,6 +844,18 @@ const feeAxis = v => '$' + String(v.toFixed(v >= 0.01 ? 3 : 7))
   .replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
 const axisFmt = fmt =>
   fmt === usd ? usdAxis : fmt === compact ? numAxis : fmt === feeUsd ? feeAxis : fmt;
+/* Same units, one decimal kept — for axes whose ticks sit close enough together
+   that the compact form rounds several of them onto one label. */
+const narrowFmt = fmt => v => {
+  if (v == null || !isFinite(v)) return '—';
+  const money = fmt === usd || fmt === feeUsd;
+  const a = Math.abs(v);
+  const [div, suf] = a >= 1e9 ? [1e9, 'B'] : a >= 1e6 ? [1e6, 'M']
+                   : a >= 1e3 ? [1e3, 'K'] : [1, ''];
+  const n = v / div;
+  const str = n.toFixed(Math.abs(n) < 10 ? 1 : 0).replace(/\.0$/, '');
+  return (money ? '$' : '') + str + suf;
+};
 const price = n => n == null || !isFinite(n) ? '—'
   : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 4 : 2 });
 const signed = (n, s = '%') => n == null || !isFinite(n) ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + s;
@@ -952,8 +976,11 @@ const gridCfg = { color: 'rgba(143,165,212,0.16)', drawTicks: false };
    enough for afterBuildTicks to lay out round intermediate ticks. */
 function logDecades(axis) {
   if (axis.type !== 'logarithmic' || !(axis.max > 0) || !(axis.min > 0)) return;
-  if (axis.max / axis.min < 10) {
-    const pad = (axis.max / axis.min) ** 0.12;      // a touch of air, in ratio
+  // Two decades, not one. A single chain spanning 14x was being given a
+  // 1,000x axis — three decades of plot for one decade of data — because the
+  // threshold only spared ranges inside a single decade.
+  if (axis.max / axis.min < 100) {
+    const pad = (axis.max / axis.min) ** 0.06;      // a touch of air, in ratio
     axis.min /= pad;
     axis.max *= pad;
     return;
@@ -1296,17 +1323,31 @@ function sparkOptions(t, unit, logScale) {
            // Log axes over a narrow range produce ugly data-edge ticks
            // (167M, 169M, ...); snap to round numbers instead.
            afterBuildTicks(axis) {
-             if (axis.type !== 'logarithmic' || axis.max / axis.min > 12) return;
+             if (axis.type !== 'logarithmic' || axis.max / axis.min > 25) return;
              const span = axis.max - axis.min;
-             const raw = span / 4;
+             // Aim for five gridlines, not four. Dividing by four landed a hair
+             // above a round step and rounded up to twice it, which left a
+             // single visible chain with two gridlines on the whole plot.
+             const raw = span / 5;
              const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-             const step = mag * (raw / mag >= 5 ? 10 : raw / mag >= 2 ? 5 : raw / mag >= 1 ? 2 : 1);
+             const n = raw / mag;
+             const step = mag * (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10);
              const ticks = [];
              for (let v = Math.ceil(axis.min / step) * step; v <= axis.max; v += step)
                ticks.push({ value: v });
              if (ticks.length >= 2) axis.ticks = ticks;
            },
-           ticks: { maxTicksLimit: 6, font: { size: 10 }, callback: v => axisFmt(t.fmt)(v) } },
+           // Over a narrow range the compact formatter collapses neighbouring
+           // ticks onto the same label — 1.1M, 1.2M and 1.3M all render "1M",
+           // so an axis reads 500K · 1M · 2M · 2M. When that happens, fall back
+           // to a formatter carrying one decimal.
+           ticks: { maxTicksLimit: 6, font: { size: 10 },
+                    callback(v, i, all) {
+                      const f = axisFmt(t.fmt);
+                      const labels = all.map(x => f(x.value));
+                      if (new Set(labels).size === labels.length) return labels[i];
+                      return narrowFmt(t.fmt)(v);
+                    } } },
     },
     plugins: { legend: { display: false },
                // Colored swatches per row so multi-chain tooltips are scannable,
@@ -1469,7 +1510,48 @@ function renderTrendPicker() {
   }
 }
 
+/* Section-wide range and interval. Twenty cards each carrying their own two
+   selects means twenty changes to ask one question across the board; these set
+   every card at once. Deliberately not sticky on the control itself — it reads
+   "Range…" again after applying, because it is an action rather than a state,
+   and the cards' own selects remain the record of what each is showing. */
+function wireGlobalTrendControls() {
+  const r = $('gRange'), a = $('gAgg');
+  if (!r || !a || r.dataset.wired) return;
+  r.dataset.wired = '1';
+  for (const k of TREND_RANGE_KEYS) {
+    if (k === 'custom') continue;            // a shared start date means nothing here
+    const o = document.createElement('option');
+    o.value = k;
+    o.textContent = RANGE_LABEL[k] || k.toUpperCase();
+    r.appendChild(o);
+  }
+  for (const [k, label] of TREND_AGGS) {
+    const o = document.createElement('option');
+    o.value = k; o.textContent = label;
+    a.appendChild(o);
+  }
+  r.addEventListener('change', e => {
+    const v = e.target.value;
+    if (!v) return;
+    for (const t of TRENDS) {
+      state.trendRanges[t.key] = v;
+      delete state.trendWindow[t.key];       // a new range is a new domain to brush
+    }
+    e.target.value = '';
+    buildTrends();
+  });
+  a.addEventListener('change', e => {
+    const v = e.target.value;
+    if (!v) return;
+    for (const t of TRENDS) state.trendAggs[t.key] = v;
+    e.target.value = '';
+    buildTrends();
+  });
+}
+
 function buildTrends() {
+  wireGlobalTrendControls();
   const grid = $('trendGrid');
   Object.values(trendCharts).forEach(c => c.destroy());
   trendCharts = {};
