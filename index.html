@@ -655,6 +655,8 @@
     <select class="rsel" id="gRange" aria-label="Set the time period on every chart">
       <option value="">Range…</option>
     </select>
+    <input type="date" class="rsel dsel" id="gFrom" hidden aria-label="Start date for every chart">
+    <input type="date" class="rsel dsel" id="gTo" hidden aria-label="End date for every chart">
     <select class="rsel" id="gAgg" aria-label="Set the interval on every chart">
       <option value="">Interval…</option>
     </select>
@@ -916,7 +918,7 @@ const state = { range: 'all', scale: 'logarithmic', priceSeries: [], totalSupply
                 agg: 'w', from: null, to: null, levered: false, dfdv: null,
                 preLeverAgg: 'w', preLeverScale: 'logarithmic',
                 trendRanges: {}, trendScales: {}, trendSmooth: {}, trendVariants: {},
-                trendHidden: {}, trendAggs: {}, trendFrom: {}, trendSeries: {}, trendCompare: {},
+                trendHidden: {}, trendAggs: {}, trendFrom: {}, trendTo: {}, trendSeries: {}, trendCompare: {},
                 trendTypes: {}, trendWindow: {}, trendPct: {} };
 
 /* ------------------------------------------------------- rainbow band model */
@@ -1221,7 +1223,7 @@ const TRENDS = [
     tip: '<b>In simple terms:</b> how much the median fee swings around — the 30-day rolling standard deviation of a chain&rsquo;s daily median fee, in dollars.<br><br><b>Why it matters:</b> a low fee is only useful if it stays low. High volatility means costs spike without warning, which is what makes budgeting for onchain activity difficult.' },
 ];
 const TREND_RANGE_KEYS = ['1d', '1w', '1m', '3m', '6m', '1y', 'ytd', '2y', '5y', 'custom'];
-const RANGE_LABEL = { custom: 'From…' };
+const RANGE_LABEL = { custom: 'Custom…' };
 const TREND_AGGS = [['d', 'Daily'], ['w', 'Weekly'], ['m', 'Monthly'], ['q', 'Quarterly'], ['y', 'Yearly']];
 
 /* Re-bucket a daily series. Flow metrics sum per bucket, level metrics keep
@@ -1371,8 +1373,8 @@ function sparkOptions(t, unit, logScale) {
 }
 
 let trendCharts = {};   // TRENDS key -> Chart instance
-function trendCutoff(range, key) {
-  if (range === 'custom') return state.trendFrom[key] || '2020-01-01';
+function trendCutoff(range, key, earliest) {
+  if (range === 'custom') return state.trendFrom[key] || earliest || '2020-01-01';
   if (range === 'ytd') return `${new Date().getUTCFullYear()}-01-01`;
   const days = { '1w': 7, '1m': 30, '3m': 91, '6m': 182, '1y': 365, '2y': 730, '5y': 1826 }[range];
   return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
@@ -1519,8 +1521,11 @@ function wireGlobalTrendControls() {
   const r = $('gRange'), a = $('gAgg');
   if (!r || !a || r.dataset.wired) return;
   r.dataset.wired = '1';
+  const f = $('gFrom'), u = $('gTo');
+  const today = new Date().toISOString().slice(0, 10);
+  if (f) f.max = today;
+  if (u) u.max = today;
   for (const k of TREND_RANGE_KEYS) {
-    if (k === 'custom') continue;            // a shared start date means nothing here
     const o = document.createElement('option');
     o.value = k;
     o.textContent = RANGE_LABEL[k] || k.toUpperCase();
@@ -1531,8 +1536,24 @@ function wireGlobalTrendControls() {
     o.value = k; o.textContent = label;
     a.appendChild(o);
   }
+  // Both ends blank to begin with: every card opens on its own full history and
+  // the reader closes in from there, which is what "as far back as possible"
+  // means when the cards do not all start on the same day.
+  const applyCustom = () => {
+    for (const t of TRENDS) {
+      state.trendRanges[t.key] = 'custom';
+      if (f.value) state.trendFrom[t.key] = f.value; else delete state.trendFrom[t.key];
+      if (u.value) state.trendTo[t.key] = u.value; else delete state.trendTo[t.key];
+      delete state.trendWindow[t.key];
+    }
+    buildTrends();
+  };
   r.addEventListener('change', e => {
     const v = e.target.value;
+    // Custom is the one range that is a state rather than an action: the select
+    // stays on it because the two date inputs beside it have to mean something.
+    f.hidden = u.hidden = v !== 'custom';
+    if (v === 'custom') { f.value = u.value = ''; applyCustom(); return; }
     if (!v) return;
     for (const t of TRENDS) {
       state.trendRanges[t.key] = v;
@@ -1541,6 +1562,8 @@ function wireGlobalTrendControls() {
     e.target.value = '';
     buildTrends();
   });
+  f.addEventListener('change', applyCustom);
+  u.addEventListener('change', applyCustom);
   a.addEventListener('change', e => {
     const v = e.target.value;
     if (!v) return;
@@ -2067,9 +2090,15 @@ function makeTrendCard(t) {
   // would clip the card down to nothing.
   const ptdOnly = PTD_RANGE[range] === period &&
     aggKey(last.d, period) === aggKey(new Date().toISOString().slice(0, 10), period);
+  // The floor for an open-ended custom range is the first date ANY plotted
+  // chain reports — not Solana's first, which on the comparison cards can be
+  // years later than Ethereum's.
+  const earliest = (cmp
+    ? seriesList.map(c => cmp[c.key]?.[0]?.d).filter(Boolean).sort()[0]
+    : solPts[0].d) || solPts[0].d;
   const cutoff = range === '1d' ? null
     : ptdOnly ? periodStart(new Date().toISOString().slice(0, 10), period)
-    : trendCutoff(range, orig.key);
+    : trendCutoff(range, orig.key, earliest);
   // Bars instead of lines, on the cross-chain cards. A line chart answers "how
   // did each chain move"; stacked bars answer "how big was the total, and who
   // made it up" — which is the question most of these cards are really about,
@@ -2131,7 +2160,10 @@ function makeTrendCard(t) {
           `<option value="${k}"${k === range ? ' selected' : ''}>${RANGE_LABEL[k] || k.toUpperCase()}</option>`).join('')}</select>
         ${range === 'custom' ? `<input type="date" class="rsel dsel" data-cfrom
             value="${state.trendFrom[orig.key] || ''}" max="${new Date().toISOString().slice(0,10)}"
-            aria-label="Start date">` : ''}
+            aria-label="Start date">
+          <input type="date" class="rsel dsel" data-cto
+            value="${state.trendTo[orig.key] || ''}" max="${new Date().toISOString().slice(0,10)}"
+            aria-label="End date">` : ''}
         <select class="rsel" data-cagg-sel aria-label="Aggregation">${TREND_AGGS.map(([k, label]) =>
           `<option value="${k}"${k === period ? ' selected' : ''}>${label}</option>`).join('')}</select>
         <select class="rsel" data-cscale-sel aria-label="Axis scale">
@@ -2166,9 +2198,14 @@ function makeTrendCard(t) {
   el.querySelector('[data-crange-sel]').addEventListener('change', e => {
     state.trendRanges[t.key] = e.target.value;
     delete state.trendWindow[t.key];   // a new range is a new domain to brush
-    if (e.target.value === 'custom' && !state.trendFrom[orig.key])
-      state.trendFrom[orig.key] = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    // Deliberately unseeded: a custom range starts as far back as that card's
+    // own data goes, and the reader narrows from there.
     const fresh = makeTrendCard(t);
+    if (fresh) el.replaceWith(fresh);
+  });
+  el.querySelector('[data-cto]')?.addEventListener('change', e => {
+    state.trendTo[orig.key] = e.target.value;
+    const fresh = makeTrendCard(orig);
     if (fresh) el.replaceWith(fresh);
   });
   el.querySelector('[data-cfrom]')?.addEventListener('change', e => {
@@ -2260,7 +2297,10 @@ function makeTrendCard(t) {
         : [{ name: 'Solana', color: t.color, v: per(last.v) }]);
   }
 
-    const clip = pts => pts.filter(p => p.d >= cutoff);
+    // A custom window can close as well as open. Blank means "up to today",
+    // which is what every other range already does.
+    const until = range === 'custom' ? (state.trendTo[orig.key] || '') : '';
+    const clip = pts => pts.filter(p => p.d >= cutoff && (!until || p.d <= until));
     const spanDays = Math.max(1, (new Date(last.d) - new Date(cutoff)) / 86400000);
     // Month ticks all the way out, rather than dropping to bare years past two:
     // a 2Y monthly chart was labelling twenty-four bars with a single "2026".
