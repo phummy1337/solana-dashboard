@@ -163,7 +163,7 @@
     .split .controls { flex-wrap: nowrap; gap: 6px; }
     .split .controls .ctl-label { display: none; }
     .split .controls button.tgl { padding: 6px 11px; font-size: 12.5px; white-space: nowrap; }
-    .split .controls select.rsel { padding: 6px 10px; font-size: 12.5px; }
+    .split .controls .rsel { padding: 6px 10px; font-size: 12.5px; }
     .split .controls #rainbowBtn { margin-left: 4px !important; }
   }
   @media (max-width: 1180px) {
@@ -263,15 +263,26 @@
   .dlrow .dlbtn { padding: 2px 8px; font-size: 10px; border-radius: 9px; opacity: 0.6; }
   .dlrow .dlbtn:hover, .dlrow .dlbtn:focus-visible { opacity: 1; }
   .stage .dlrow { margin-top: 10px; }
-  select.rsel { font-family: Syne; font-size: 14px; font-weight: 700; color: var(--peri);
-                background: var(--panel); border: 1px solid rgba(143,165,212,0.2); border-radius: 20px;
-                padding: 7px 12px; cursor: pointer; appearance: auto; }
-  .trend-ctl.small select.rsel { font-size: 10px; padding: 2px 6px; border-radius: 9px; }
-  select.rsel:hover { color: var(--ink); border-color: rgba(143,165,212,0.4); }
-  select.rsel:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+  /* One pill for both the selects and the date boxes that sit beside them. The
+     rules used to be scoped to select, which left the date inputs wearing the
+     browser's own white chrome in the middle of a row of dark pills. */
+  .rsel { font-family: Syne; font-size: 14px; font-weight: 700; color: var(--peri);
+          background: var(--panel); border: 1px solid rgba(143,165,212,0.2); border-radius: 20px;
+          padding: 7px 12px; cursor: pointer; }
+  select.rsel { appearance: auto; }
+  .trend-ctl.small .rsel { font-size: 10px; padding: 2px 6px; border-radius: 9px; }
+  .rsel:hover { color: var(--ink); border-color: rgba(143,165,212,0.4); }
+  .rsel:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
   select.rsel option { background: #0D1A34; color: var(--ink); }
-  input.dsel { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
-  .trend-ctl.small input.dsel { font-size: 10px; padding: 1px 5px; }
+  /* The date widget's internals are the one part a class cannot reach: dark the
+     calendar chrome and tint its button to the periwinkle of the text. */
+  input.dsel { color-scheme: dark; line-height: 1.1; }
+  input.dsel::-webkit-datetime-edit { padding: 0; }
+  input.dsel::-webkit-calendar-picker-indicator {
+    filter: invert(74%) sepia(13%) saturate(640%) hue-rotate(186deg) brightness(96%);
+    opacity: 0.65; cursor: pointer; margin-left: 4px; }
+  input.dsel:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+  .trend-ctl.small input.dsel::-webkit-calendar-picker-indicator { margin-left: 2px; }
   .leg .v { color: var(--mute); margin-left: 2px; }
   .legend button.leg { background: none; border: none; padding: 0; cursor: pointer;
                        font: inherit; color: #D3DBEA; }
