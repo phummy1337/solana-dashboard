@@ -1814,7 +1814,7 @@ function snapshotChart(chart, targetTickPx = 15, dpr = 4, box = null) {
   return snap;
 }
 
-async function buildTrendImage(key, title, fmt, el, win, byChain) {
+async function buildTrendImage(key, title, fmt, el, byChain) {
   const chart = trendCharts[key];
   if (!chart) return null;
   let items;
@@ -1842,21 +1842,23 @@ async function buildTrendImage(key, title, fmt, el, win, byChain) {
   // single series it describes a breakdown the image does not show, and the
   // legend already names the chain.
   if (byChain && items.length > 1) title += ' by Chain';
+  // The cadence is the one control worth carrying onto the image: a monthly bar
+  // and a daily one are different charts, and unlike the window it is nowhere
+  // on the axes. It rides in the title, where the card has room for it.
+  const agg = el.querySelector('[data-cagg-sel]');
+  if (agg && agg.value !== 'd') title += ` · ${agg.selectedOptions[0].textContent}`;
 
-  // The window leads the note: it is the first thing you need to know about a
-  // card that has travelled away from the control that produced it.
-  const note = (win ? win + ' · ' : '') + el.querySelector('.note').textContent.trim();
+  const note = el.querySelector('.note').textContent.trim();
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
   return buildShareImage(snapshotChart(chart, 15, 4, shareLayout(items, fmt).chart),
                          title, note, items, fmt);
 }
 
 async function downloadTrendImage(key, title, fmt, el, range, byChain) {
-  // Same reasoning as the price card: the range was already in the filename but
-  // not on the image, so two exports of the same chart over different windows
-  // arrived looking identical.
-  const win = rangeTitle(range);
-  const cv = await buildTrendImage(key, title, fmt, el, win, byChain);
+  // No window caption. On a trend card the x axis is already a date axis, so
+  // "Past 2 Years" or "Custom Range" only repeats the labels underneath it, and
+  // the one-day view's note names the day outright.
+  const cv = await buildTrendImage(key, title, fmt, el, byChain);
   if (cv) saveCanvas(cv, `state-of-solana-${key.replace(/_/g, '-')}-${range}.png`);
 }
 
@@ -2155,14 +2157,15 @@ function makeTrendCard(t) {
   // `tcard` carries the card's own layout rules, which have to survive the
   // panel being moved out of #trendGrid and into the enlarge modal.
   el.className = 'panel tcard';
+  // Only what the picture cannot say for itself. Log scale, stacked bars and the
+  // share-of-total view are all legible from the axes, the cadence is named by
+  // the select sitting directly above, and the window is written along the x
+  // axis — the note had grown into a six-clause restatement of the chart. A
+  // 7-day average and a cumulative rebase are not visible at all, so they stay.
   const noteTail = (range === '1d' ? ' · latest complete day' : '')
                  + (t.noteUnit || '')
-                 + (period !== 'd' ? ' · ' + TREND_AGGS.find(a => a[0] === period)[1].toLowerCase()
-                    + (t.rebase ? ' change per period'
-                       : aggMode === 'sum' ? ' totals' : aggMode === 'mean' ? ' averages' : ', period end') : '')
-                 + (t.rebase && period === 'd' ? ' · cumulative from window start' : '')
-                 + (logScale ? ' · log scale' : '')
-                 + (barMode ? (pctMode ? ' · share of total' : ' · stacked bars') : '')
+                 + (t.rebase ? (period === 'd' ? ' · cumulative from window start'
+                                               : ' · change per period') : '')
                  + (smooth ? (period === 'd' ? ' · 7-day average' : ' · 7-period average') : '');
   el.innerHTML = `<div class="crow"><h3 style="display:flex;align-items:center">${t.title}${t.tip
         ? `<span class="uinfo" tabindex="0" role="button" aria-label="What is this metric?">?<span class="tipbox">${t.tip}</span></span>` : ''}</h3>
