@@ -3337,8 +3337,12 @@ function renderYield(y) {
     const a = y.apyusd;
     html += row(a, 'apyx', `<b>${usd(a.tvl_reserves ?? a.tvl_protocol)}</b>`);
   }
+  // Solana TVL, not the product's all-chain total. Under a heading that says
+  // "on Solana", BUIDL's $3.05B and USDY's $2.20B are mostly Ethereum; the
+  // all-chain figure moves to the hover, where it is context rather than claim.
   html += (y.items || []).filter(r => (r.apy30d ?? 0) > 2)
-    .map(r => row(r, '', `<b>${usd(r.tvl_total ?? r.tvl)}</b>`)).join('');
+    .map(r => row(r, '', `<b${r.tvl_total > r.tvl * 1.05
+        ? ` title="${usd(r.tvl_total)} across all chains"` : ''}>${usd(r.tvl)}</b>`)).join('');
   tb.innerHTML = html;
   $('yieldNote').textContent =
     'Yields are 30-day averages — apyUSD via the Apyx API, all other products via DefiLlama.';
