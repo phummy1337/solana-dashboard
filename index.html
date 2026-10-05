@@ -206,6 +206,9 @@
   .panel h3 { font-size: 14px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
   .panel .big { font-size: 25px; font-weight: 700; margin-top: 6px; }
   .panel .note { font-size: 12.5px; color: var(--peri); font-weight: 600; margin-top: 3px; }
+  /* Two tables under one heading now, so each says which half it is. */
+  .ysub { font-family: Syne; font-size: 11px; font-weight: 800; letter-spacing: .12em;
+          text-transform: uppercase; color: var(--mute); margin-bottom: 10px; }
 
   .spark { position: relative; height: 96px; margin-top: 12px; }
   .spark canvas { width: 100% !important; height: 100% !important; }
@@ -698,13 +701,24 @@
 <div class="shead"><h2>Top Yields on Solana</h2><span class="rule"></span></div>
 <section class="grid">
   <div class="panel" style="grid-column: 1 / -1;">
+    <div class="ysub">Dollar yields</div>
     <div style="overflow-x:auto">
       <table class="ytable" id="yieldTable">
-        <thead><tr><th>Product</th><th>Platform</th><th class="num">TVL</th><th class="num">APY (30d avg)</th></tr></thead>
+        <thead><tr><th>Product</th><th>Platform</th><th class="num">TVL on Solana</th><th class="num">APY (30d avg)</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
     <div class="note" id="yieldNote" style="margin-top:10px"></div>
+  </div>
+  <div class="panel" style="grid-column: 1 / -1;" id="lstPanel" hidden>
+    <div class="ysub">SOL staking yields</div>
+    <div style="overflow-x:auto">
+      <table class="ytable" id="lstTable">
+        <thead><tr><th>Token</th><th>Platform</th><th class="num">TVL on Solana</th><th class="num">APY (30d avg)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="note" id="lstNote" style="margin-top:10px"></div>
   </div>
 </section>
 
@@ -2613,6 +2627,7 @@ async function loadData() {
     renderTrendPicker();
     buildTrends();
     renderYield(d.yield_products);
+    renderLst(d.lst_yields);
     renderNews(d.news);
     renderSeason(d.monthly_returns);
     renderMarquee(d.news);
@@ -3317,7 +3332,12 @@ const PROJECT_NAMES = {
   'apyx-protocol': 'Apyx', 'blackrock-buidl': 'BlackRock',
   'jupiter-lend': 'Jupiter Lend', 'kamino-lend': 'Kamino Lend',
   'ondo-yield-assets': 'Ondo Finance', 'sentora': 'Sentora', 'credix': 'Credix',
-  'save': 'Save', 'unitas-usdu': 'Unitas',
+  'save': 'Save', 'unitas-usdu': 'Unitas', 'onre': 'Onre', 'hastra': 'Hastra',
+  'sanctum-infinity': 'Sanctum', 'jupiter-staked-sol': 'Jupiter', 'jpool': 'JPool',
+  'marinade-liquid-staking': 'Marinade', 'helius-staked-sol': 'Helius',
+  'drift-staked-sol': 'Drift', 'dfdv-staked-sol': 'DeFi Development Corp.',
+  'jito-liquid-staking': 'Jito', 'the-vault-liquid-staking': 'The Vault',
+  'binance-staked-sol': 'Binance', 'bybit-staked-sol': 'Bybit', 'blazestake': 'BlazeStake',
 };
 const projName = p => PROJECT_NAMES[p] || p.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
@@ -3340,12 +3360,36 @@ function renderYield(y) {
   // Solana TVL, not the product's all-chain total. Under a heading that says
   // "on Solana", BUIDL's $3.05B and USDY's $2.20B are mostly Ethereum; the
   // all-chain figure moves to the hover, where it is context rather than claim.
-  html += (y.items || []).filter(r => (r.apy30d ?? 0) > 2)
-    .map(r => row(r, '', `<b${r.tvl_total > r.tvl * 1.05
-        ? ` title="${usd(r.tvl_total)} across all chains"` : ''}>${usd(r.tvl)}</b>`)).join('');
+  html += (y.items || []).filter(r => (r.apy30d ?? 0) > 2).map(r => {
+    const hov = [r.markets > 1 ? `${r.markets} markets, summed` : '',
+                 r.tvl_total > r.tvl * 1.05 ? `${usd(r.tvl_total)} across all chains` : '']
+      .filter(Boolean).join(' · ');
+    return row(r, '', `<b${hov ? ` title="${hov}"` : ''}>${usd(r.tvl)}</b>`);
+  }).join('');
   tb.innerHTML = html;
   $('yieldNote').textContent =
-    'Yields are 30-day averages — apyUSD via the Apyx API, all other products via DefiLlama.';
+    'Yields are 30-day averages — apyUSD via the Apyx API, all other products via DefiLlama. '
+    + 'TVL counts Solana only; a platform running the same asset across several markets is '
+    + 'shown as one row, summed, with its rate weighted by size.';
+}
+
+/* The dollar table answers "where does a dollar earn on Solana". This one asks
+   the same of SOL itself, which is the larger pool of capital and had no place
+   on a page headed "Top Yields on Solana". */
+function renderLst(rows) {
+  if (!rows?.length) return;
+  $('lstPanel').hidden = false;
+  $('lstTable').querySelector('tbody').innerHTML = rows.map(r => `<tr>
+    <td><span class="prod">${r.logo ? `<img class="clogo" src="${r.logo}" alt="" loading="lazy"
+          onerror="this.style.display='none'">` : ''}<span class="sym">${r.symbol}</span></span></td>
+    <td>${r.url
+      ? `<a class="plink" href="${r.url}" target="_blank" rel="noopener" title="${r.url}">${projName(r.project)}</a>`
+      : projName(r.project)}</td>
+    <td class="num"><b>${usd(r.tvl)}</b></td>
+    <td class="num"><b>${r.apy30d.toFixed(2)}%</b></td></tr>`).join('');
+  $('lstNote').textContent =
+    'Liquid staking tokens, 30-day average APY, via DefiLlama. Staking yield is paid in SOL, '
+    + 'so these returns are on top of whatever SOL itself does.';
 }
 
 /* --------------------------------------------------------- network upgrades */

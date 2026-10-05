@@ -1098,25 +1098,76 @@ def main() -> int:
     APYX_POOL_ID = "cb6139f9-4a68-4efd-8245-0312a92aee55"
     try:
         pools = get("https://yields.llama.fi/pools")["data"]
-        best: dict = {}
-        for p in pools:
-            sym = (p.get("symbol") or "").upper()
-            if (p.get("chain") != "Solana" or not p.get("stablecoin") or "-" in sym
-                    or (p.get("tvlUsd") or 0) < 10e6 or (p.get("apy") or 0) <= 0):
+        sol_pools = [p for p in pools if p.get("chain") == "Solana"]
+
+        # DefiLlama's `stablecoin` boolean is the only gate we had, and only 260
+        # of 2,600 Solana pools carry it: Onre's ONYC ($288M at 11%) and
+        # Hastra's PRIME and AUTO are all USDC-backed yield products that it
+        # misses. So derive the USD mint set from the pools DefiLlama *does*
+        # flag, then let an unflagged pool in when its collateral is one of
+        # them. Self-maintaining, since the set is rebuilt every run.
+        usd_mints: set = set()
+        for p in sol_pools:
+            if not (p.get("stablecoin") and p.get("exposure") == "single"):
                 continue
-            k = (p["project"], sym)
-            if k not in best or p["tvlUsd"] > best[k]["tvlUsd"]:
-                best[k] = p
+            sym = (p.get("symbol") or "").upper()
+            # The flag covers every peg; this table is the dollar. Named by what
+            # it rejects rather than what it accepts, so a mint like Hastra's
+            # WYLDS - a dollar token whose ticker never says so, and the
+            # collateral behind $197M of PRIME and AUTO - is not lost to a
+            # spelling test.
+            if "-" in sym or any(c in sym for c in ("EUR", "GBP", "JPY", "CHF", "TRY", "BRL")):
+                continue
+            usd_mints.update(p.get("underlyingTokens") or [])
+
+        def usd_pool(p) -> bool:
+            if p.get("stablecoin"):
+                return True
+            toks = p.get("underlyingTokens") or []
+            return bool(toks) and all(t in usd_mints for t in toks)
+
+        # One row per project+symbol, summing every market rather than keeping
+        # the deepest: Kamino runs USDC across three markets ($10.6M at 4.64%,
+        # $8.0M at 6.47%, $3.2M at 4.81%), and taking the biggest dropped two
+        # thirds of the TVL and hid the best rate on the platform. TVL-weighted
+        # so the rate and the size describe the same set of pools.
+        groups: dict = {}
+        for p in sol_pools:
+            sym = (p.get("symbol") or "").upper()
+            if ("-" in sym or p.get("exposure") != "single" or p.get("ilRisk") == "yes"
+                    or (p.get("tvlUsd") or 0) <= 0 or (p.get("apy") or 0) <= 0
+                    or not usd_pool(p)):
+                continue
+            groups.setdefault((p["project"], sym), []).append(p)
+
+        def blend(ps, field):
+            w = sum(q["tvlUsd"] for q in ps)
+            return sum((q.get(field) or 0) * q["tvlUsd"] for q in ps) / w if w else 0
+
+        # The floor applies to the deepest single market, not the sum: Neutral
+        # Trade runs nine USDC vaults of $0.2M-$4.2M that add to $14M and would
+        # otherwise head the table at 26%, a rate nobody can get at size. The
+        # row still reports the summed TVL once its best market clears the bar.
+        best: dict = {}
+        for k, ps in groups.items():
+            tvl = sum(q["tvlUsd"] for q in ps)
+            if max(q["tvlUsd"] for q in ps) < 10e6:
+                continue
+            best[k] = {"tvlUsd": tvl, "apy": blend(ps, "apy"),
+                       "apyMean30d": blend(ps, "apyMean30d"), "n": len(ps)}
         # Platform homepages, for the linked Platform column. Referral query
         # strings (DefiLlama tags some URLs) are stripped.
         proto_urls: dict = {}
+        proto_cat: dict = {}
         try:
-            proto_urls = {p.get("slug"): (p.get("url") or "").split("?")[0]
-                          for p in get("https://api.llama.fi/protocols")}
+            protos = get("https://api.llama.fi/protocols")
+            proto_urls = {p.get("slug"): (p.get("url") or "").split("?")[0] for p in protos}
+            proto_cat = {p.get("slug"): p.get("category") for p in protos}
         except Exception as e:  # noqa: BLE001
             warn(f"protocol urls: {e}")
 
         # Product-wide TVL: the same project+symbol summed across every chain.
+        # Shown only on hover, as context for the Solana figure in the column.
         totals: dict = {}
         for p in pools:
             k = (p.get("project"), (p.get("symbol") or "").upper())
@@ -1154,7 +1205,8 @@ def main() -> int:
         items = [{
             "symbol": s, "project": proj, "tvl": round(p["tvlUsd"]),
             "tvl_total": round(totals.get((proj, s), p["tvlUsd"])),
-            "apy": round(p.get("apy") or 0, 2), "apy30d": round(p.get("apyMean30d") or 0, 2),
+            "apy": round(p["apy"], 2), "apy30d": round(p["apyMean30d"], 2),
+            "markets": p["n"],
             "url": proto_urls.get(proj) or None,
             "logo": logo_for(s),
         } for (proj, s), p in best.items()]
@@ -1212,6 +1264,48 @@ def main() -> int:
         data["yield_products"] = {"apyusd": apyusd, "items": items}
         print(f"  yield products: {len(items)} + apyUSD "
               f"({apyusd['apy'] if apyusd else '—'}% APY)")
+
+        # ----------------------------------------------------- liquid staking
+        # The stablecoin table answers "where does a dollar earn on Solana";
+        # this one answers the same for SOL itself, which is the larger pool of
+        # capital and was missing from a page headed "Top Yields on Solana".
+        # Sanctum Infinity is filed under Dexs rather than Liquid Staking, so it
+        # is named outright instead of being lost to a category it never had.
+        LST_EXTRA = {"sanctum-infinity"}
+        lst_groups: dict = {}
+        for p in sol_pools:
+            sym = (p.get("symbol") or "").upper()
+            if ((proto_cat.get(p["project"]) != "Liquid Staking"
+                 and p["project"] not in LST_EXTRA)
+                    or "-" in sym or (p.get("tvlUsd") or 0) < 25e6
+                    or (p.get("apy") or 0) <= 0):
+                continue
+            k = (p["project"], sym)
+            if k not in lst_groups or p["tvlUsd"] > lst_groups[k]["tvlUsd"]:
+                lst_groups[k] = p
+        lst = sorted(({
+            "symbol": sym, "project": proj, "tvl": round(p["tvlUsd"]),
+            "apy": round(p.get("apy") or 0, 2), "apy30d": round(p.get("apyMean30d") or 0, 2),
+            "url": proto_urls.get(proj) or None,
+        } for (proj, sym), p in lst_groups.items()), key=lambda x: -x["apy30d"])[:8]
+        # Jupiter's token list rather than CoinGecko search for these. They are
+        # Solana-native, so it resolves every one where CoinGecko's search both
+        # missed them and 429'd on the extra eight lookups; it also returns the
+        # ticker properly cased, which is how the tokens write themselves.
+        for it in lst:
+            try:
+                hits = [t for t in get("https://lite-api.jup.ag/tokens/v2/search"
+                                       f"?query={it['symbol']}")
+                        if (t.get("symbol") or "").upper() == it["symbol"]]
+                hits.sort(key=lambda t: -(t.get("mcap") or 0))
+                if hits:
+                    it["logo"] = hits[0].get("icon")
+                    it["symbol"] = hits[0].get("symbol") or it["symbol"]
+            except Exception as e:  # noqa: BLE001
+                warn(f"jup token {it['symbol']}: {e}")
+        data["lst_yields"] = lst
+        print(f"  liquid staking: {len(lst)} tokens "
+              f"(top {lst[0]['symbol']} {lst[0]['apy30d']}%)" if lst else "  liquid staking: none")
     except Exception as e:  # noqa: BLE001
         warn(f"yield products: {e}")
 
