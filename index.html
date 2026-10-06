@@ -2171,8 +2171,9 @@ function makeTrendCard(t) {
   // 7-day average and a cumulative rebase are not visible at all, so they stay.
   const noteTail = (range === '1d' ? ' · latest complete day' : '')
                  + (t.noteUnit || '')
-                 + (t.rebase ? (period === 'd' ? ' · cumulative from window start'
-                                               : ' · change per period') : '')
+                 + (t.rebase && range !== '1d'
+                    ? (period === 'd' ? ' · cumulative from window start'
+                                      : ' · change per period') : '')
                  + (smooth ? (period === 'd' ? ' · 7-day average' : ' · 7-period average') : '');
   el.innerHTML = `<div class="crow"><h3 style="display:flex;align-items:center">${t.title}${t.tip
         ? `<span class="uinfo" tabindex="0" role="button" aria-label="What is this metric?">?<span class="tipbox">${t.tip}</span></span>` : ''}</h3>
@@ -2312,10 +2313,19 @@ function makeTrendCard(t) {
   if (range === '1d') {
       // Single-day view: a bar per chain (or one bar for Solana-only metrics).
       const per = v => t.perSecond ? v / 86400 : v;
+      // A rebased card stores levels, not changes — prices, here — and is
+      // rebased to the window start further down, in a path this early return
+      // never reaches. Taking the raw last value drew BTC's $100,000 as
+      // "+100000.0%". One day of a performance card is the day's own move.
+      const val = pts => {
+        if (!t.rebase) return per(pts[pts.length - 1].v);
+        const [prev, cur] = pts.slice(-2);
+        return pts.length > 1 && prev.v ? (cur.v / prev.v - 1) * 100 : null;
+      };
       return renderBars(cmp
         ? seriesList.filter(c => cmp[c.key]?.length)
-            .map(c => ({ name: c.name, color: c.color, v: per(cmp[c.key][cmp[c.key].length - 1].v) }))
-        : [{ name: 'Solana', color: t.color, v: per(last.v) }]);
+            .map(c => ({ name: c.name, color: c.color, v: val(cmp[c.key]) }))
+        : [{ name: 'Solana', color: t.color, v: val(solPts) }]);
   }
 
     // A custom window can close as well as open. Blank means "up to today",
