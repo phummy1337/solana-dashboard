@@ -206,9 +206,6 @@
   .panel h3 { font-size: 14px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
   .panel .big { font-size: 25px; font-weight: 700; margin-top: 6px; }
   .panel .note { font-size: 12.5px; color: var(--peri); font-weight: 600; margin-top: 3px; }
-  /* Two tables under one heading now, so each says which half it is. */
-  .ysub { font-family: Syne; font-size: 11px; font-weight: 800; letter-spacing: .12em;
-          text-transform: uppercase; color: var(--mute); margin-bottom: 10px; }
 
   .spark { position: relative; height: 96px; margin-top: 12px; }
   .spark canvas { width: 100% !important; height: 100% !important; }
@@ -292,6 +289,12 @@
   .legend button.leg:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; border-radius: 4px; }
   .leg[aria-pressed="false"] { opacity: 0.35; }
 
+  /* Says this table is dollars, which the section heading above it does not.
+     Syne at 11px with .12em tracking and 800 weight was mush, and --mute made
+     it no louder than the column headers it is supposed to sit above: body
+     face, brighter, and tracked just enough to read as a label. */
+  .ysub { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+          color: var(--ink); margin-bottom: 14px; }
   .ytable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .ytable th { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
                color: var(--mute); text-align: left; padding: 4px 14px 9px 0; }
@@ -709,16 +712,6 @@
       </table>
     </div>
     <div class="note" id="yieldNote" style="margin-top:10px"></div>
-  </div>
-  <div class="panel" style="grid-column: 1 / -1;" id="lstPanel" hidden>
-    <div class="ysub">SOL staking yields</div>
-    <div style="overflow-x:auto">
-      <table class="ytable" id="lstTable">
-        <thead><tr><th>Token</th><th>Platform</th><th class="num">TVL on Solana</th><th class="num">APY (30d avg)</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div class="note" id="lstNote" style="margin-top:10px"></div>
   </div>
 </section>
 
@@ -2627,7 +2620,6 @@ async function loadData() {
     renderTrendPicker();
     buildTrends();
     renderYield(d.yield_products);
-    renderLst(d.lst_yields);
     renderNews(d.news);
     renderSeason(d.monthly_returns);
     renderMarquee(d.news);
@@ -3333,11 +3325,6 @@ const PROJECT_NAMES = {
   'jupiter-lend': 'Jupiter Lend', 'kamino-lend': 'Kamino Lend',
   'ondo-yield-assets': 'Ondo Finance', 'sentora': 'Sentora', 'credix': 'Credix',
   'save': 'Save', 'unitas-usdu': 'Unitas', 'onre': 'Onre', 'hastra': 'Hastra',
-  'sanctum-infinity': 'Sanctum', 'jupiter-staked-sol': 'Jupiter', 'jpool': 'JPool',
-  'marinade-liquid-staking': 'Marinade', 'helius-staked-sol': 'Helius',
-  'drift-staked-sol': 'Drift', 'dfdv-staked-sol': 'DeFi Development Corp.',
-  'jito-liquid-staking': 'Jito', 'the-vault-liquid-staking': 'The Vault',
-  'binance-staked-sol': 'Binance', 'bybit-staked-sol': 'Bybit', 'blazestake': 'BlazeStake',
 };
 const projName = p => PROJECT_NAMES[p] || p.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
@@ -3373,24 +3360,6 @@ function renderYield(y) {
     + 'shown as one row, summed, with its rate weighted by size.';
 }
 
-/* The dollar table answers "where does a dollar earn on Solana". This one asks
-   the same of SOL itself, which is the larger pool of capital and had no place
-   on a page headed "Top Yields on Solana". */
-function renderLst(rows) {
-  if (!rows?.length) return;
-  $('lstPanel').hidden = false;
-  $('lstTable').querySelector('tbody').innerHTML = rows.map(r => `<tr>
-    <td><span class="prod">${r.logo ? `<img class="clogo" src="${r.logo}" alt="" loading="lazy"
-          onerror="this.style.display='none'">` : ''}<span class="sym">${r.symbol}</span></span></td>
-    <td>${r.url
-      ? `<a class="plink" href="${r.url}" target="_blank" rel="noopener" title="${r.url}">${projName(r.project)}</a>`
-      : projName(r.project)}</td>
-    <td class="num"><b>${usd(r.tvl)}</b></td>
-    <td class="num"><b>${r.apy30d.toFixed(2)}%</b></td></tr>`).join('');
-  $('lstNote').textContent =
-    'Liquid staking tokens, 30-day average APY, via DefiLlama. Staking yield is paid in SOL, '
-    + 'so these returns are on top of whatever SOL itself does.';
-}
 
 /* --------------------------------------------------------- network upgrades */
 // Mirrors solana.com/upgrades (checked 2026-10-03). Statuses move slowly;

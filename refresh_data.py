@@ -1158,11 +1158,9 @@ def main() -> int:
         # Platform homepages, for the linked Platform column. Referral query
         # strings (DefiLlama tags some URLs) are stripped.
         proto_urls: dict = {}
-        proto_cat: dict = {}
         try:
-            protos = get("https://api.llama.fi/protocols")
-            proto_urls = {p.get("slug"): (p.get("url") or "").split("?")[0] for p in protos}
-            proto_cat = {p.get("slug"): p.get("category") for p in protos}
+            proto_urls = {p.get("slug"): (p.get("url") or "").split("?")[0]
+                          for p in get("https://api.llama.fi/protocols")}
         except Exception as e:  # noqa: BLE001
             warn(f"protocol urls: {e}")
 
@@ -1265,47 +1263,6 @@ def main() -> int:
         print(f"  yield products: {len(items)} + apyUSD "
               f"({apyusd['apy'] if apyusd else '—'}% APY)")
 
-        # ----------------------------------------------------- liquid staking
-        # The stablecoin table answers "where does a dollar earn on Solana";
-        # this one answers the same for SOL itself, which is the larger pool of
-        # capital and was missing from a page headed "Top Yields on Solana".
-        # Sanctum Infinity is filed under Dexs rather than Liquid Staking, so it
-        # is named outright instead of being lost to a category it never had.
-        LST_EXTRA = {"sanctum-infinity"}
-        lst_groups: dict = {}
-        for p in sol_pools:
-            sym = (p.get("symbol") or "").upper()
-            if ((proto_cat.get(p["project"]) != "Liquid Staking"
-                 and p["project"] not in LST_EXTRA)
-                    or "-" in sym or (p.get("tvlUsd") or 0) < 25e6
-                    or (p.get("apy") or 0) <= 0):
-                continue
-            k = (p["project"], sym)
-            if k not in lst_groups or p["tvlUsd"] > lst_groups[k]["tvlUsd"]:
-                lst_groups[k] = p
-        lst = sorted(({
-            "symbol": sym, "project": proj, "tvl": round(p["tvlUsd"]),
-            "apy": round(p.get("apy") or 0, 2), "apy30d": round(p.get("apyMean30d") or 0, 2),
-            "url": proto_urls.get(proj) or None,
-        } for (proj, sym), p in lst_groups.items()), key=lambda x: -x["apy30d"])[:8]
-        # Jupiter's token list rather than CoinGecko search for these. They are
-        # Solana-native, so it resolves every one where CoinGecko's search both
-        # missed them and 429'd on the extra eight lookups; it also returns the
-        # ticker properly cased, which is how the tokens write themselves.
-        for it in lst:
-            try:
-                hits = [t for t in get("https://lite-api.jup.ag/tokens/v2/search"
-                                       f"?query={it['symbol']}")
-                        if (t.get("symbol") or "").upper() == it["symbol"]]
-                hits.sort(key=lambda t: -(t.get("mcap") or 0))
-                if hits:
-                    it["logo"] = hits[0].get("icon")
-                    it["symbol"] = hits[0].get("symbol") or it["symbol"]
-            except Exception as e:  # noqa: BLE001
-                warn(f"jup token {it['symbol']}: {e}")
-        data["lst_yields"] = lst
-        print(f"  liquid staking: {len(lst)} tokens "
-              f"(top {lst[0]['symbol']} {lst[0]['apy30d']}%)" if lst else "  liquid staking: none")
     except Exception as e:  # noqa: BLE001
         warn(f"yield products: {e}")
 
