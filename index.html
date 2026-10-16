@@ -208,6 +208,11 @@
   .panel .note { font-size: 12.5px; color: var(--peri); font-weight: 600; margin-top: 3px; }
 
   .spark { position: relative; height: 96px; margin-top: 12px; }
+  /* The .tall and .withleg rules are scoped to #trendGrid, so this card sets
+     its own. Its legend reads better as a row beneath the plot than as a narrow
+     right-hand column, because the labels are short. */
+  #seasonPathWrap .spark { height: 400px; }
+  #seasonPathWrap .legend { display: flex; flex-wrap: wrap; gap: 9px 20px; margin-top: 14px; }
   .spark canvas { width: 100% !important; height: 100% !important; }
   /* trend cards get real chart height */
   /* Taller than before: the legend no longer needs rows underneath, so the
@@ -697,6 +702,31 @@
   <div class="panel" style="grid-column: 1 / -1;">
     <div style="overflow-x:auto"><table class="stable" id="seasonTable"></table></div>
     <div class="note" id="seasonNote" style="margin-top:11px"></div>
+  </div>
+</section>
+
+<!-- ------------------------------------------ SOL seasonality path overlay -->
+<div class="shead"><h2>SOL This Period vs History</h2><span class="rule"></span>
+  <span class="trend-ctl small">
+    <select class="rsel" id="seasonMode" aria-label="Period to compare">
+      <option value="year">Year to date</option>
+      <option value="quarter">Quarter to date</option>
+      <option value="month">Month to date</option>
+    </select>
+    <select class="rsel" id="seasonScale" aria-label="Axis scale">
+      <option value="pct">% change</option>
+      <option value="mult">Growth multiple, log</option>
+    </select>
+  </span>
+  <button class="tgl" id="seasonPathDl" title="Download as PNG">&#10514; PNG</button></div>
+<section class="grid">
+  <div class="panel" id="seasonPathWrap" style="grid-column: 1 / -1;">
+    <div class="note" id="seasonPathNote"></div>
+    <div class="chartrow">
+      <div class="spark tall"><canvas id="seasonPathCv" role="img"
+        aria-label="Cumulative SOL return through the period, this year against prior years"></canvas></div>
+      <div class="legend" id="seasonPathLeg"></div>
+    </div>
   </div>
 </section>
 
@@ -2632,6 +2662,7 @@ async function loadData() {
     renderYield(d.yield_products);
     renderNews(d.news);
     renderSeason(d.monthly_returns);
+    renderSeasonPaths();
     renderMarquee(d.news);
 
     if (d.warnings?.length) console.warn('data.json warnings:', d.warnings);
@@ -3328,6 +3359,224 @@ function setLevered(on, { scroll = false } = {}) {
 $('leveredBtn').addEventListener('click', () => setLevered(!state.levered));
 // Someone pasting the link into an already-open tab should get the view too.
 addEventListener('hashchange', () => { applyPriceHash(); });
+
+/* --------------------------------------------- seasonality path overlay ----
+   The returns table above answers "what did October usually do". This answers
+   the live version of the same question: where does the current period sit
+   against the same period in every prior year, measured day by day from the
+   period's own start. Every path is rebased to the close before day one, so a
+   year that began at $8 and one that began at $180 are directly comparable. */
+/* Distinct hues rather than a single ramp: with six history lines on one plot,
+   telling them apart matters more than signalling which is older. */
+const SEASON_HIST = ['#6B7FAB', '#A855F7', '#EF4444', '#F0B90B', '#2563EB', '#22D3EE', '#F97316'];
+const SEASON_NOW = '#14F195';
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const dayOff = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+const lastDay = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();   // m is 1-based
+const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+let seasonPathChart = null;
+
+function seasonPeriods(mode, pts) {
+  const last = pts[pts.length - 1].d;
+  const ly = +last.slice(0, 4), lm = +last.slice(5, 7);
+  const firstY = +pts[0].d.slice(0, 4);
+  const out = [];
+  for (let y = firstY; y <= ly; y++) {
+    if (mode === 'year') {
+      out.push({ y, label: String(y), start: iso(y, 1, 1), end: iso(y, 12, 31), span: lastDay(y, 2) === 29 ? 366 : 365 });
+    } else if (mode === 'quarter') {
+      const q = Math.floor((lm - 1) / 3), m0 = q * 3 + 1, m1 = m0 + 2;
+      out.push({ y, label: `Q${q + 1} ${y}`, start: iso(y, m0, 1), end: iso(y, m1, lastDay(y, m1)),
+                 span: lastDay(y, m0) + lastDay(y, m0 + 1) + lastDay(y, m1) });
+    } else {
+      out.push({ y, label: `${MONTH_ABBR[lm - 1]} ${y}`, start: iso(y, lm, 1),
+                 end: iso(y, lm, lastDay(y, lm)), span: lastDay(y, lm) });
+    }
+  }
+  return out;
+}
+
+/* Base on the close BEFORE day one, so the first day's own move is counted.
+   Only the earliest period, where no prior close exists, bases on day one. */
+function seasonPath(per, pts) {
+  const inPer = pts.filter(p => p.d >= per.start && p.d <= per.end);
+  if (inPer.length < 2) return null;
+  let base = null, from = per.start;
+  for (const p of pts) { if (p.d < per.start) base = p.v; else break; }
+  if (base == null) {
+    // The history begins mid-period — 2020 opens on 10 April. Skip the partial
+    // first month and base on the close before the first complete one, which is
+    // the convention the returns table above already uses. Basing on the first
+    // trade instead would print 2020 as +58.9% directly beneath a table saying
+    // +118.6%.
+    const f = inPer[0].d, fy = +f.slice(0, 4), fm = +f.slice(5, 7);
+    const firstFull = +f.slice(8, 10) === 1 ? iso(fy, fm, 1)
+                    : fm === 12 ? iso(fy + 1, 1, 1) : iso(fy, fm + 1, 1);
+    if (firstFull <= per.end) {
+      for (const p of pts) { if (p.d < firstFull) base = p.v; else break; }
+      from = firstFull;
+    }
+    if (base == null) { base = inPer[0].v; from = inPer[0].d; }
+  }
+  const seg = inPer.filter(p => p.d >= from);
+  if (seg.length < 2) return null;
+  return { ...per, partial: seg[seg.length - 1].d < per.end,
+           through: seg[seg.length - 1].d, from,
+           data: seg.map(p => ({ x: dayOff(per.start, p.d), y: (p.v / base - 1) * 100,
+                                 m: p.v / base })) };
+}
+
+function seasonTicks(mode, periods) {
+  const ref = periods[periods.length - 1];
+  if (mode === 'year') {
+    const y = ref.y, out = [];
+    for (let m = 1; m <= 12; m++) out.push({ v: dayOff(iso(y, 1, 1), iso(y, m, 1)), t: MONTH_ABBR[m - 1] });
+    return out;
+  }
+  if (mode === 'quarter') {
+    const m0 = +ref.start.slice(5, 7), out = [];
+    for (let i = 0; i < 3; i++) out.push({ v: dayOff(ref.start, iso(ref.y, m0 + i, 1)), t: MONTH_ABBR[m0 + i - 1] });
+    return out;
+  }
+  const out = [];
+  for (let d = 1; d <= ref.span; d += 5) out.push({ v: d - 1, t: String(d) });
+  return out;
+}
+
+function wireSeasonPaths() {
+  const sel = $('seasonMode');
+  if (!sel || sel.dataset.wired) return;
+  sel.dataset.wired = '1';
+  sel.addEventListener('change', e => {
+    state.seasonMode = e.target.value;
+    delete state.seasonScale;          // each period gets its own sensible default
+    renderSeasonPaths();
+  });
+  $('seasonScale')?.addEventListener('change', e => {
+    state.seasonScale = e.target.value; renderSeasonPaths();
+  });
+  $('seasonPathDl')?.addEventListener('click', async () => {
+    if (!seasonPathChart) return;
+    const items = seasonPathChart.data.datasets
+      .map((d, i) => ({ d, i })).filter(({ i }) => seasonPathChart.isDatasetVisible(i))
+      .map(({ d }) => ({ label: d.label, color: d.borderColor,
+                         val: d.data[d.data.length - 1].y }))
+      .reverse();
+    const mode = state.seasonMode || 'year';
+    const unit = mode === 'year' ? 'Year' : mode === 'quarter' ? 'Quarter' : 'Month';
+    await dfdvLogo();
+    const fmt = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+    const cv = await buildShareImage(
+      snapshotChart(seasonPathChart, 15, 4, shareLayout(items, fmt).chart),
+      `SOL ${unit} to Date vs History`,
+      $('seasonPathNote').textContent.split('.').slice(0, 2).join('.') + '.',
+      items, fmt);
+    if (cv) saveCanvas(cv, `state-of-solana-seasonality-${mode}.png`);
+  });
+}
+
+function renderSeasonPaths() {
+  wireSeasonPaths();
+  const pts = (state.trendSeries?.price || []);
+  if (pts.length < 30) return;
+  const mode = state.seasonMode || 'year';
+  // A year axis in per cent is unreadable: 2021 finished +11,143% and flattens
+  // every other line onto the zero gridline. Growth multiple on a log axis puts
+  // a 112x year and a -94% year on the same picture, so that is the default for
+  // years. Quarters and months have no such spread and read better in per cent.
+  const scale = state.seasonScale || (mode === 'year' ? 'mult' : 'pct');
+  if ($('seasonScale')) $('seasonScale').value = scale;
+  const logY = scale === 'mult';
+  const periods = seasonPeriods(mode, pts);
+  const paths = periods.map(p => seasonPath(p, pts)).filter(Boolean);
+  if (!paths.length) return;
+  const cur = paths[paths.length - 1];
+  const hist = paths.slice(0, -1);
+
+  const ds = paths.map((p, i) => {
+    const now = p === cur;
+    const col = now ? SEASON_NOW : SEASON_HIST[Math.min(i, SEASON_HIST.length - 1)];
+    return { label: p.label,
+             data: p.data.map(q => ({ x: q.x, y: logY ? q.m : q.y, pct: q.y })),
+             borderColor: col, backgroundColor: col,
+             borderWidth: now ? 3.4 : 1.8, pointRadius: 0, pointHoverRadius: 0,
+             tension: 0.25, order: now ? 0 : 1 };
+  });
+
+  const ticks = seasonTicks(mode, periods);
+  const xMax = Math.max(...paths.map(p => p.span));
+  seasonPathChart?.destroy();
+  const cv = $('seasonPathCv');
+  seasonPathChart = new Chart(cv, {
+    type: 'line',
+    data: { datasets: ds },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      parsing: false, normalized: true,
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { ...tooltipCfg, callbacks: {
+          title: c => {
+            const d = c[0].parsed.x;
+            return mode === 'month' ? `Day ${d + 1}`
+              : (() => { const ref = periods[periods.length - 1];
+                         const dt = new Date(Date.parse(ref.start + 'T00:00:00Z') + d * 86400000);
+                         return `${MONTH_ABBR[dt.getUTCMonth()]} ${dt.getUTCDate()}`; })();
+          },
+          label: c => { const v = c.raw.pct;
+            return `${c.dataset.label}: ${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+                 + (logY ? `  (${c.parsed.y.toFixed(2)}×)` : ''); },
+        } } },
+      scales: {
+        x: { type: 'linear', min: 0, max: xMax - 1,
+             ticks: { color: 'var(--mute)', font: { family: 'Syne', size: 11, weight: '600' },
+                      autoSkip: false, includeBounds: false,
+                      callback: v => (ticks.find(t => t.v === v) || {}).t || '' },
+             afterBuildTicks: a => { a.ticks = ticks.filter(t => t.v <= a.max).map(t => ({ value: t.v })); },
+             grid: { display: false } },
+        y: logY
+          ? { type: 'logarithmic',
+              ticks: { color: 'var(--mute)', font: { family: 'Syne', size: 11, weight: '600' },
+                       // Chart.js chooses its own log ticks, so match the
+                       // 1-2-5 decade pattern rather than a fixed list.
+                       callback: v => { const m = v / Math.pow(10, Math.floor(Math.log10(v)));
+                         return [1, 2, 5].some(k => Math.abs(m - k) < 0.01)
+                           ? `${v >= 1 ? v.toFixed(0) : v.toFixed(2)}×` : ''; } },
+              grid: { color: 'var(--line-2)' } }
+          : { ticks: { color: 'var(--mute)', font: { family: 'Syne', size: 11, weight: '600' },
+                       callback: v => `${v > 0 ? '+' : ''}${v}%` },
+              grid: { color: 'var(--line-2)' } },
+      },
+    },
+  });
+
+  // Legend doubles as the readout: each period's return at its own end, and
+  // the current one's return so far.
+  const leg = $('seasonPathLeg');
+  // The legend always reads in per cent, whichever way the axis is drawn —
+  // that is the number people quote.
+  const val = p => { const v = p.data[p.data.length - 1].y; return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`; };
+  leg.innerHTML = paths.slice().reverse().map(p => {
+    const i = paths.indexOf(p), now = p === cur;
+    const col = now ? SEASON_NOW : SEASON_HIST[Math.min(i, SEASON_HIST.length - 1)];
+    return `<button class="leg" data-si="${i}" aria-pressed="true">
+      <span class="sw" style="background:${col}"></span>${p.label}
+      <span class="v">${val(p)}</span></button>`;
+  }).join('');
+  leg.querySelectorAll('[data-si]').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.si, on = !seasonPathChart.isDatasetVisible(i);
+    seasonPathChart.setDatasetVisibility(i, on);
+    b.setAttribute('aria-pressed', String(on));
+    seasonPathChart.update();
+  }));
+
+  const unit = mode === 'year' ? 'year' : mode === 'quarter' ? 'quarter' : 'month';
+  $('seasonPathNote').textContent =
+    `Cumulative return from the start of each ${unit}, rebased to the close before day one`
+    + (logY ? ', drawn as growth multiple on a log axis so 2021 does not flatten the rest' : '')
+    + `. ${cur.label} is through ${fmtDate(cur.through)}. Click a label to hide it — the axis refits.`;
+}
 
 /* ----------------------------------------------------- yield products table */
 const PROJECT_NAMES = {
