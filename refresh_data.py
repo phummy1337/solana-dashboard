@@ -1683,7 +1683,13 @@ def main() -> int:
                 bf = bf.get("compare") or {}
 
             for block, chains in bf.items():
-                cur = compare.get(block) or {}
+                # Fall back to what was published last run when this run's fetch
+                # produced nothing. The catch-all carry happens after this point,
+                # so without the fallback a backfill could never repair a block
+                # whose live fetch had failed - which is the one case it exists
+                # for. This is how the 20 October holders export went in and
+                # came back out again.
+                cur = compare.get(block) or (prev_all.get("compare") or {}).get(block) or {}
                 if not cur:
                     continue          # nothing published to merge into
                 added = 0
@@ -1696,12 +1702,12 @@ def main() -> int:
                             by_date[d0] = v
                             added += 1
                     cur[chain] = [{"d": d, "v": by_date[d]} for d in sorted(by_date)]
-                compare[block] = cur
+                compare[block] = cur          # also publishes a carried block
                 newest = max((pts[-1]["d"] for pts in cur.values() if pts), default="?")
                 print(f"  backfill {block}: {added} points merged, now through {newest}")
 
             for key, points in series_bf.items():
-                cur = data["series"].get(key)
+                cur = data["series"].get(key) or (prev_all.get("series") or {}).get(key)
                 if not cur:
                     continue
                 by_date = {p["d"]: p["v"] for p in cur}
