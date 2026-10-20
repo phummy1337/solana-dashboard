@@ -218,6 +218,12 @@ jobs:
           mkdir -p _site
           cp index.html data.json highlights.json CNAME robots.txt sitemap.xml \
              og-card-v4.png dfdv-logo.png _site/
+          # Cloudflare holds data.json at the edge, and nothing purges it on
+          # deploy - so a fresh build could sit behind a stale copy for the
+          # rest of the edge TTL. Stamp the URL the page fetches with this
+          # build's id: a new deploy is a new cache key, never a stale hit.
+          sed -i "s|DATA: 'data.json'|DATA: 'data.json?v=${GITHUB_RUN_ID}'|" _site/index.html
+          grep -q "data.json?v=${GITHUB_RUN_ID}" _site/index.html
           ls -la _site
 
       - uses: actions/upload-pages-artifact@v3
