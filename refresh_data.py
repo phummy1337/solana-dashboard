@@ -94,12 +94,17 @@ def warn(msg: str) -> None:
 UA = "solana-dashboard/1.0 (+refresh_data.py)"
 
 
+LAST_HEADERS: dict[str, str] = {}
+
+
 def get(url: str, headers: dict | None = None, tries: int = 3) -> dict | list:
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json", **(headers or {})})
     last = None
     for attempt in range(tries):
         try:
             with urllib.request.urlopen(req, timeout=90, context=_SSL_CTX) as r:
+                LAST_HEADERS.clear()
+                LAST_HEADERS.update({k.lower(): v for k, v in r.headers.items()})
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             # The body says which limit was hit and for how long; without it a
@@ -125,13 +130,44 @@ def get(url: str, headers: dict | None = None, tries: int = 3) -> dict | list:
     raise RuntimeError(f"GET {url.split('?')[0]} failed: {last}")
 
 
+# Blockworks meters a monthly allowance (x-usage-limit, 2,500 on this plan) and
+# the window resets around the 22nd, not the 1st. Two guards, because the
+# October run blew through it: a reserve the run refuses to spend into, and a
+# dead stop the moment the API says the month is gone. Without the second one a
+# spent budget costs ~45 further calls per build in failed retries.
+BW_RESERVE = 200
+bw_remaining: int | None = None
+bw_stop_reason: str = ""
+
+
+class BudgetSpent(RuntimeError):
+    """Raised instead of calling, once the window's allowance is gone."""
+
+
 def bw(path: str, **params) -> dict | list:
+    global bw_remaining, bw_stop_reason
     if not BW_KEY:
         raise RuntimeError("BLOCKWORKS_API_KEY is not set")
+    if bw_stop_reason:
+        raise BudgetSpent(bw_stop_reason)
     url = f"{BW_BASE}/{path.lstrip('/')}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    return get(url, {"x-api-key": BW_KEY})
+    try:
+        d = get(url, {"x-api-key": BW_KEY}, tries=2)
+    except RuntimeError as e:
+        if "usage limit" in str(e).lower():
+            bw_stop_reason = "Blockworks monthly allowance is spent"
+            warn(f"{bw_stop_reason} — skipping every further Blockworks call this run")
+        raise
+    rem = LAST_HEADERS.get("x-usage-remaining", "")
+    if rem.isdigit():
+        bw_remaining = int(rem)
+        if bw_remaining <= BW_RESERVE:
+            bw_stop_reason = (f"Blockworks allowance down to {bw_remaining}, "
+                              f"at or under the {BW_RESERVE} reserve")
+            warn(f"{bw_stop_reason} — holding the rest back for the end of the window")
+    return d
 
 
 def metric(slug: str, project: str = "solana") -> dict[str, float]:
@@ -401,10 +437,26 @@ def main() -> int:
     # Same shape as the DefiLlama skip further down, which took that source from
     # ~1,440 calls a month to ~360 without changing a published number.
     bw_yesterday = (date.today() - timedelta(days=1)).isoformat()
+    bw_today = date.today().isoformat()
     bw_skipped: list[str] = []
 
+    # The "published through yesterday" test below is necessary but nowhere near
+    # sufficient. Blockworks itself runs two to three days behind, so that test
+    # is almost never true, and with the refresh firing eight times a day every
+    # build re-fetched essentially everything — about 128 calls a day against an
+    # allowance that affords 83. It ran dry on 17 October.
+    #
+    # So the real guard is this one: a block is fetched at most once per UTC day,
+    # whatever the upstream date says and however many builds run. Burn is now a
+    # function of the calendar instead of the cron, roughly 16 calls a day.
+    bw_fetched_prev = prev_all.get("bw_fetched") or {}
+    bw_fetched: dict[str, str] = dict(bw_fetched_prev)
+    bw_attempted: list[tuple[str, str]] = []
+
     def bw_current(where: str, key: str) -> bool:
-        """True when what we already published runs to yesterday or later."""
+        """True when this block needs no call today."""
+        if bw_fetched_prev.get(f"{where}.{key}") == bw_today:
+            return True
         blk = (prev_all.get(where) or {}).get(key)
         if isinstance(blk, dict):
             newest = max((pts[-1]["d"] for pts in blk.values()
@@ -423,11 +475,18 @@ def main() -> int:
         should not look like a failed fetch.
         """
         if not bw_current(where, key):
+            # Stamped on the attempt, not on success: a block that errors out
+            # retries on tomorrow's first build rather than on the next one
+            # three hours from now, which is what let a bad day compound.
+            bw_attempted.append((where, key))
+            bw_fetched[f"{where}.{key}"] = bw_today
             return False
         blk = (prev_all.get(where) or {}).get(key)
         (compare if where == "compare" else data["series"])[key] = blk
         bw_skipped.append(label)
-        print(f"  {label}: already through {bw_yesterday} — skipped")
+        fresh = bw_fetched_prev.get(f"{where}.{key}") == bw_today
+        print(f"  {label}: {'already fetched today' if fresh else f'already through {bw_yesterday}'}"
+              f" — skipped")
         return True
 
     # ------------------------------------------------------- network volume
@@ -919,12 +978,16 @@ def main() -> int:
     # Avalanche is excluded per Pete: not a comparison he wants on this card.
     FEE_CHAINS = [c for c in CHAINS_ALL if c not in ("tron", "avalanche")]
     # One call feeds three cards, so the whole block is guarded together.
+    # This block calls bw_current directly rather than bw_reuse, so it has to
+    # take the once-a-day stamp itself or it would call on every build.
     if all(bw_current("compare", k) for k in ("fee_median", "fee_vol", "fsr")):
         for k in ("fee_median", "fee_vol", "fsr"):
             compare[k] = (prev_all.get("compare") or {})[k]
         bw_skipped.append("fee median/vol/FSR")
-        print(f"  fee median/vol/FSR: already through {bw_yesterday} — skipped")
+        print("  fee median/vol/FSR: skipped")
     else:
+        for k in ("fee_median", "fee_vol", "fsr"):
+            bw_fetched[f"compare.{k}"] = bw_today
         try:
             d = bw("v1/metrics/transaction-fee-med-usd", project=",".join(FEE_CHAINS))
             fee_out: dict = {}
@@ -1671,10 +1734,13 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001 - a bad backfill must not stop the run
         warn(f"blockworks backfill: {e}")
 
+    if bw_remaining is not None:
+        print(f"\nBlockworks allowance: {bw_remaining} calls left in this window")
     if bw_skipped:
         print(f"  Blockworks: skipped {len(bw_skipped)} already-current block(s) "
               f"— {', '.join(bw_skipped)}")
 
+    data["bw_fetched"] = bw_fetched
     data["compare"] = compare
 
     # ------------------------------------------------- keep the last good data
