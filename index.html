@@ -3530,23 +3530,23 @@ function renderSeasonPaths() {
         } } },
       scales: {
         x: { type: 'linear', min: 0, max: xMax - 1,
-             ticks: { color: 'var(--mute)', font: { family: 'Syne', size: 11, weight: '600' },
+             ticks: { color: '#A9BCE0', font: { size: 12.5, weight: '600' },
                       autoSkip: false, includeBounds: false,
                       callback: v => (ticks.find(t => t.v === v) || {}).t || '' },
              afterBuildTicks: a => { a.ticks = ticks.filter(t => t.v <= a.max).map(t => ({ value: t.v })); },
              grid: { display: false } },
         y: logY
           ? { type: 'logarithmic',
-              ticks: { color: 'var(--mute)', font: { family: 'Syne', size: 11, weight: '600' },
+              ticks: { color: '#A9BCE0', font: { size: 12.5, weight: '600' },
                        // Chart.js chooses its own log ticks, so match the
                        // 1-2-5 decade pattern rather than a fixed list.
                        callback: v => { const m = v / Math.pow(10, Math.floor(Math.log10(v)));
                          return [1, 2, 5].some(k => Math.abs(m - k) < 0.01)
                            ? `${v >= 1 ? v.toFixed(0) : v.toFixed(2)}×` : ''; } },
-              grid: { color: 'var(--line-2)' } }
-          : { ticks: { color: 'var(--mute)', font: { family: 'Syne', size: 11, weight: '600' },
+              grid: gridCfg }
+          : { ticks: { color: '#A9BCE0', font: { size: 12.5, weight: '600' },
                        callback: v => `${v > 0 ? '+' : ''}${v}%` },
-              grid: { color: 'var(--line-2)' } },
+              grid: gridCfg },
       },
     },
   });
