@@ -11,7 +11,9 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import ssl
 import sys
@@ -130,43 +132,128 @@ def get(url: str, headers: dict | None = None, tries: int = 3) -> dict | list:
     raise RuntimeError(f"GET {url.split('?')[0]} failed: {last}")
 
 
-# Blockworks meters a monthly allowance (x-usage-limit, 2,500 on this plan) and
-# the window resets around the 22nd, not the 1st. Two guards, because the
-# October run blew through it: a reserve the run refuses to spend into, and a
-# dead stop the moment the API says the month is gone. Without the second one a
-# spent budget costs ~45 further calls per build in failed retries.
-BW_RESERVE = 200
+# Blockworks meters a monthly allowance (x-usage-limit, 2,500 on this plan). The
+# window runs from the 28th to the 28th at about 03:45 UTC -- measured from the
+# September outage, which lifted between two builds at 03:47 on 28 September. It
+# is NOT the 22nd: that date belongs to x-ratelimit-reset-client-month, a separate
+# 1,000,000-call ceiling that is irrelevant here, and reading one as the other is
+# why October ran dry on the 17th.
+#
+# Three guards, all at this one choke point so no call site can slip past them:
+#
+#  1. A response cache. Each distinct request is answered from disk if it was
+#     fetched earlier in the same half-day (split at 15:00 UTC, because Blockworks
+#     lands the previous day anywhere from 08:00 to 19:00). The refresh fires
+#     eight times a day; the API now sees at most two of them. CI persists the
+#     directory with actions/cache. Without this, three un-gated calls alone
+#     (two tile metrics and the REV chart) cost ~720 a month.
+#
+#  2. A daily pacing cap. Each UTC day may spend at most
+#         (remaining at its first call - reserve) / days until the reset
+#     recomputed every day from the live header. That cannot exhaust the window
+#     however wrong any estimate of per-build cost is: each day takes no more than
+#     its share of what is actually left.
+#
+#  3. A dead stop the moment the API reports the limit, so a spent window costs
+#     one failed call per build rather than ~45.
+BW_RESERVE = 150
+BW_CACHE = Path(os.environ.get("BW_CACHE_DIR", Path(__file__).resolve().parent / ".bw_cache"))
 bw_remaining: int | None = None
 bw_stop_reason: str = ""
+bw_calls_run = 0
+bw_cache_hits = 0
 
 
 class BudgetSpent(RuntimeError):
-    """Raised instead of calling, once the window's allowance is gone."""
+    """Raised instead of calling, once spending would breach the budget."""
+
+
+def _bw_now():
+    return datetime.now(timezone.utc)
+
+
+def _bw_bucket(now) -> str:
+    return f"{now.date().isoformat()}{'pm' if now.hour >= 15 else 'am'}"
+
+
+def _bw_days_to_reset(now) -> int:
+    """Whole days left in the window, counting today. Resets the 28th ~03:45 UTC."""
+    reset = now.replace(day=28, hour=3, minute=45, second=0, microsecond=0)
+    if now >= reset:
+        y, m = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
+        reset = reset.replace(year=y, month=m)
+    return max(1, math.ceil((reset - now).total_seconds() / 86400))
+
+
+def _bw_meta() -> dict:
+    f = BW_CACHE / "_meta.json"
+    today = _bw_now().date().isoformat()
+    try:
+        m = json.loads(f.read_text())
+        if m.get("day") == today:
+            return m
+    except Exception:  # noqa: BLE001 - no cache yet, or a damaged one
+        pass
+    return {"day": today, "calls": 0, "start_remaining": None}
+
+
+def _bw_save_meta(m: dict) -> None:
+    BW_CACHE.mkdir(parents=True, exist_ok=True)
+    (BW_CACHE / "_meta.json").write_text(json.dumps(m))
 
 
 def bw(path: str, **params) -> dict | list:
-    global bw_remaining, bw_stop_reason
+    global bw_remaining, bw_stop_reason, bw_calls_run, bw_cache_hits
     if not BW_KEY:
         raise RuntimeError("BLOCKWORKS_API_KEY is not set")
-    if bw_stop_reason:
-        raise BudgetSpent(bw_stop_reason)
     url = f"{BW_BASE}/{path.lstrip('/')}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
+
+    now = _bw_now()
+    bucket = _bw_bucket(now)
+    cfile = BW_CACHE / (hashlib.sha1(url.encode()).hexdigest() + ".json")
+    try:
+        c = json.loads(cfile.read_text())
+        if c.get("bucket") == bucket:
+            bw_cache_hits += 1
+            return c["data"]
+    except Exception:  # noqa: BLE001 - miss
+        pass
+
+    if bw_stop_reason:
+        raise BudgetSpent(bw_stop_reason)
+    meta = _bw_meta()
+    if meta.get("start_remaining") is not None:
+        cap = (meta["start_remaining"] - BW_RESERVE) // _bw_days_to_reset(now)
+        if meta["calls"] >= cap:
+            bw_stop_reason = (f"Blockworks daily pacing cap reached ({meta['calls']}/{cap} today, "
+                              f"{_bw_days_to_reset(now)} day(s) to the 28th reset)")
+            warn(f"{bw_stop_reason} -- carrying forward until tomorrow")
+            raise BudgetSpent(bw_stop_reason)
+
     try:
         d = get(url, {"x-api-key": BW_KEY}, tries=2)
     except RuntimeError as e:
         if "usage limit" in str(e).lower():
-            bw_stop_reason = "Blockworks monthly allowance is spent"
-            warn(f"{bw_stop_reason} — skipping every further Blockworks call this run")
+            bw_stop_reason = "Blockworks monthly allowance is spent (window resets the 28th)"
+            warn(f"{bw_stop_reason} -- skipping every further Blockworks call this run")
         raise
+
+    bw_calls_run += 1
+    meta["calls"] += 1
     rem = LAST_HEADERS.get("x-usage-remaining", "")
     if rem.isdigit():
         bw_remaining = int(rem)
+        if meta.get("start_remaining") is None:
+            meta["start_remaining"] = bw_remaining + 1     # as it stood before this call
         if bw_remaining <= BW_RESERVE:
             bw_stop_reason = (f"Blockworks allowance down to {bw_remaining}, "
                               f"at or under the {BW_RESERVE} reserve")
-            warn(f"{bw_stop_reason} — holding the rest back for the end of the window")
+            warn(f"{bw_stop_reason} -- holding the rest back until the 28th")
+    _bw_save_meta(meta)
+    BW_CACHE.mkdir(parents=True, exist_ok=True)
+    cfile.write_text(json.dumps({"bucket": bucket, "data": d}))
     return d
 
 
@@ -437,26 +524,10 @@ def main() -> int:
     # Same shape as the DefiLlama skip further down, which took that source from
     # ~1,440 calls a month to ~360 without changing a published number.
     bw_yesterday = (date.today() - timedelta(days=1)).isoformat()
-    bw_today = date.today().isoformat()
     bw_skipped: list[str] = []
 
-    # The "published through yesterday" test below is necessary but nowhere near
-    # sufficient. Blockworks itself runs two to three days behind, so that test
-    # is almost never true, and with the refresh firing eight times a day every
-    # build re-fetched essentially everything — about 128 calls a day against an
-    # allowance that affords 83. It ran dry on 17 October.
-    #
-    # So the real guard is this one: a block is fetched at most once per UTC day,
-    # whatever the upstream date says and however many builds run. Burn is now a
-    # function of the calendar instead of the cron, roughly 16 calls a day.
-    bw_fetched_prev = prev_all.get("bw_fetched") or {}
-    bw_fetched: dict[str, str] = dict(bw_fetched_prev)
-    bw_attempted: list[tuple[str, str]] = []
-
     def bw_current(where: str, key: str) -> bool:
-        """True when this block needs no call today."""
-        if bw_fetched_prev.get(f"{where}.{key}") == bw_today:
-            return True
+        """True when what we already published runs to yesterday or later."""
         blk = (prev_all.get(where) or {}).get(key)
         if isinstance(blk, dict):
             newest = max((pts[-1]["d"] for pts in blk.values()
@@ -475,18 +546,11 @@ def main() -> int:
         should not look like a failed fetch.
         """
         if not bw_current(where, key):
-            # Stamped on the attempt, not on success: a block that errors out
-            # retries on tomorrow's first build rather than on the next one
-            # three hours from now, which is what let a bad day compound.
-            bw_attempted.append((where, key))
-            bw_fetched[f"{where}.{key}"] = bw_today
             return False
         blk = (prev_all.get(where) or {}).get(key)
         (compare if where == "compare" else data["series"])[key] = blk
         bw_skipped.append(label)
-        fresh = bw_fetched_prev.get(f"{where}.{key}") == bw_today
-        print(f"  {label}: {'already fetched today' if fresh else f'already through {bw_yesterday}'}"
-              f" — skipped")
+        print(f"  {label}: already through {bw_yesterday} — skipped")
         return True
 
     # ------------------------------------------------------- network volume
@@ -978,16 +1042,12 @@ def main() -> int:
     # Avalanche is excluded per Pete: not a comparison he wants on this card.
     FEE_CHAINS = [c for c in CHAINS_ALL if c not in ("tron", "avalanche")]
     # One call feeds three cards, so the whole block is guarded together.
-    # This block calls bw_current directly rather than bw_reuse, so it has to
-    # take the once-a-day stamp itself or it would call on every build.
     if all(bw_current("compare", k) for k in ("fee_median", "fee_vol", "fsr")):
         for k in ("fee_median", "fee_vol", "fsr"):
             compare[k] = (prev_all.get("compare") or {})[k]
         bw_skipped.append("fee median/vol/FSR")
         print("  fee median/vol/FSR: skipped")
     else:
-        for k in ("fee_median", "fee_vol", "fsr"):
-            bw_fetched[f"compare.{k}"] = bw_today
         try:
             d = bw("v1/metrics/transaction-fee-med-usd", project=",".join(FEE_CHAINS))
             fee_out: dict = {}
@@ -1740,13 +1800,15 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001 - a bad backfill must not stop the run
         warn(f"blockworks backfill: {e}")
 
-    if bw_remaining is not None:
-        print(f"\nBlockworks allowance: {bw_remaining} calls left in this window")
+    _m = _bw_meta()
+    print(f"\nBlockworks: {bw_calls_run} API call(s) this run, {bw_cache_hits} served from cache; "
+          f"{_m['calls']} today; "
+          + (f"{bw_remaining} left in the window, " if bw_remaining is not None else "")
+          + f"{_bw_days_to_reset(_bw_now())} day(s) to the 28th reset")
     if bw_skipped:
         print(f"  Blockworks: skipped {len(bw_skipped)} already-current block(s) "
               f"— {', '.join(bw_skipped)}")
 
-    data["bw_fetched"] = bw_fetched
     data["compare"] = compare
 
     # ------------------------------------------------- keep the last good data

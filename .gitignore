@@ -14,3 +14,4 @@ data.json
 # dataset in git history. tools/llama_local.py writes them; the build reads
 # them from outside the repo.
 local/
+.bw_cache/

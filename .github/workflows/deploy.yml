@@ -118,6 +118,20 @@ jobs:
       - name: Install certifi
         run: pip install --quiet certifi
 
+      # Blockworks response cache, shared across every build on the same UTC
+      # day. refresh_data.py answers a repeat request from it instead of the
+      # metered API, and keeps the day's call count here for its pacing cap -
+      # so this cache is what makes eight builds a day cost the same as two.
+      - name: Day key for the Blockworks cache
+        id: bwday
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Restore Blockworks cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .bw_cache
+          key: bw-${{ steps.bwday.outputs.day }}-${{ github.run_id }}
+          restore-keys: bw-${{ steps.bwday.outputs.day }}-
+
       - name: Obtain data.json
         env:
           BLOCKWORKS_API_KEY: ${{ secrets.BLOCKWORKS_API_KEY }}
@@ -173,6 +187,15 @@ jobs:
             [ -f prev.json ] && cp prev.json data.json
             python3 refresh_data.py
           fi
+
+      # Saved even when a later step fails: the call counter must survive, or
+      # a failed build would hand the next one a clean slate and a fresh cap.
+      - name: Save Blockworks cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .bw_cache
+          key: bw-${{ steps.bwday.outputs.day }}-${{ github.run_id }}
 
       - name: Check the data before publishing it
         run: |
