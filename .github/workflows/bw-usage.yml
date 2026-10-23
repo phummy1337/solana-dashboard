@@ -29,9 +29,11 @@ jobs:
                   code = getattr(e, "code", "ERR")
                   hdr = {}
                   if hasattr(e, "headers"):
+                      # Everything on an error: the reset time, if the API
+                      # sends one, is exactly what a 429 needs to tell us.
                       hdr = {k.lower(): v for k, v in e.headers.items()
-                             if any(w in k.lower() for w in
-                                    ("ratelimit", "quota", "remaining", "credit"))}
+                             if k.lower() not in ("set-cookie", "cf-ray", "server",
+                                                  "date", "content-length", "connection")}
                   return code, hdr
 
           # one cheap real call, to read whatever the edge reports back
