@@ -1721,7 +1721,14 @@ async function buildShareImage(src, title, note, items, fmt) {
   bg.addColorStop(0, '#0A1633'); bg.addColorStop(1, '#030815');
   g.fillStyle = bg; g.fillRect(0, 0, W, H);
 
-  g.fillStyle = '#F1F5FB'; g.font = '700 36px Syne, sans-serif';
+  // Shrink a long title to the space left of the DFDV mark rather than letting
+  // it run underneath it.
+  const logoW = logo ? 24 * logo.width / logo.height : 0;
+  const titleMax = W - 2 * PAD - logoW - 40;
+  let tSize = 36;
+  g.font = `700 ${tSize}px Syne, sans-serif`;
+  while (tSize > 22 && g.measureText(title).width > titleMax) g.font = `700 ${--tSize}px Syne, sans-serif`;
+  g.fillStyle = '#F1F5FB';
   g.fillText(title, PAD, 66);
   // note: plain string, or [{t, c}] segments for per-word coloring
   if (Array.isArray(note)) {
@@ -1851,7 +1858,7 @@ function snapshotChart(chart, targetTickPx = 15, dpr = 4, box = null) {
   return snap;
 }
 
-async function buildTrendImage(key, title, fmt, el, byChain) {
+async function buildTrendImage(key, title, fmt, el, byChain, range) {
   const chart = trendCharts[key];
   if (!chart) return null;
   let items;
@@ -1879,13 +1886,30 @@ async function buildTrendImage(key, title, fmt, el, byChain) {
   // single series it describes a breakdown the image does not show, and the
   // legend already names the chain.
   if (byChain && items.length > 1) title += ' by Chain';
-  // The cadence is the one control worth carrying onto the image: a monthly bar
-  // and a daily one are different charts, and unlike the window it is nowhere
-  // on the axes. It rides in the title, where the card has room for it.
+  // The cadence is the one control worth carrying onto the image, since it is
+  // nowhere on the axes. It lives in the subtitle: in the title it ran into the
+  // DFDV mark. The on-screen "Latest · date · MTD (27 of 31 days)" line does not
+  // travel - an image says which period it shows, not how far through it is.
   const agg = el.querySelector('[data-cagg-sel]');
-  if (agg && agg.value !== 'd') title += ` · ${agg.selectedOptions[0].textContent}`;
-
-  const note = el.querySelector('.note').textContent.trim();
+  const cad = agg && agg.value !== 'd' ? agg.selectedOptions[0].textContent : 'Daily';
+  const noteEl = el.querySelector('.note');
+  const asOf = noteEl.dataset.date, ptd = noteEl.dataset.ptd;
+  const caveats = (noteEl.dataset.tail || '').replace(/^ · /, '');
+  const dt = asOf ? new Date(asOf + 'T00:00:00Z') : null;
+  const PTD = {
+    WTD: ['Week to date', () => `week of ${fmtDate(asOf)}`],
+    MTD: ['Month to date', () => `${dt.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} ${dt.getUTCFullYear()}`],
+    QTD: ['Quarter to date', () => `Q${Math.floor(dt.getUTCMonth() / 3) + 1} ${dt.getUTCFullYear()}`],
+    YTD: ['Year to date', () => String(dt.getUTCFullYear())],
+  };
+  // One period ranked as bars (labels are chains, not dates) versus a series.
+  const ranked = chart.config.type === 'bar' && chart.options.scales?.x?.type !== 'time';
+  let lead;
+  if (range === '1d' && asOf) lead = fmtDate(asOf);
+  else if (ranked && PTD[ptd] && dt) lead = `${PTD[ptd][0]} · ${PTD[ptd][1]()}`;
+  else if (PTD[ptd]) lead = `${cad} · latest ${PTD[ptd][0].toLowerCase().replace(' to date', '')} to date`;
+  else lead = cad;
+  const note = [lead, caveats].filter(Boolean).join(' · ');
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
   return buildShareImage(snapshotChart(chart, 15, 4, shareLayout(items, fmt).chart),
                          title, note, items, fmt);
@@ -1895,7 +1919,7 @@ async function downloadTrendImage(key, title, fmt, el, range, byChain) {
   // No window caption. On a trend card the x axis is already a date axis, so
   // "Past 2 Years" or "Custom Range" only repeats the labels underneath it, and
   // the one-day view's note names the day outright.
-  const cv = await buildTrendImage(key, title, fmt, el, byChain);
+  const cv = await buildTrendImage(key, title, fmt, el, byChain, range);
   if (cv) saveCanvas(cv, `state-of-solana-${key.replace(/_/g, '-')}-${range}.png`);
 }
 
@@ -2484,6 +2508,8 @@ function makeTrendCard(t) {
   const setNote = dateStr => {
     const noteEl = el.querySelector('.note');
     noteEl.textContent = `Latest · ${fmtDate(dateStr)}` + (noteEl.dataset.tail || '') + ptdNote;
+    noteEl.dataset.date = dateStr;
+    noteEl.dataset.ptd = ptdPt ? ptdPt.ptd : '';
   };
 
   // Exactly one period on screen: rank the chains in it rather than drawing a
