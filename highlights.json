@@ -212,6 +212,65 @@
           "b": "Solana settled $78.3B of spot DEX volume, up 20.0% on August, while its share of tracked volume fell from 43% to 29% — the rest of the market grew faster. Cumulative DEX volume crossed $3 trillion mid-month."
         }
       ]
+    },
+    "2026-10": {
+      "note": "October brought two core network upgrades: 200ms target slots and Alpenglow on mainnet. Institutional settlement, tokenized assets and stablecoin distribution also expanded.",
+      "items": [
+        {
+          "d": "2026-10-09",
+          "cat": "Protocol",
+          "t": "Target slot times reach 200ms",
+          "card": "Slot times reach 200ms",
+          "b": "The final stage of SIMD-0525 activated on October 9, cutting target slot times to 200 milliseconds from the original 400. Slot time is the block-production cadence, separate from transaction finality.",
+          "u": "https://solana.com/news/solana-ecosystem-roundup-october-2026"
+        },
+        {
+          "d": "2026-10-21",
+          "cat": "Protocol",
+          "t": "Alpenglow goes live on mainnet",
+          "card": "Alpenglow goes live",
+          "b": "Votor replaced TowerBFT in epoch 1064, targeting roughly 150ms finality instead of 12.8 seconds. Votes now travel directly between validators rather than as transactions in blocks, so total TPS needs a new baseline even without a fall in user activity. Rotor, the block-propagation phase, remains for a later release.",
+          "u": "https://solana.com/upgrades/alpenglow"
+        },
+        {
+          "d": "2026-10",
+          "cat": "Payments",
+          "t": "Fiserv brings bank settlement onto Solana",
+          "card": "Fiserv bank platform goes live",
+          "b": "Fiserv’s Digital Asset Platform went live with Bank of North Dakota’s Roughrider Coin as its first deployment, with transactions settling on Solana. VersaBank provides issuance and reserve services, alongside Fireblocks infrastructure.",
+          "u": "https://solana.com/news/solana-ecosystem-roundup-october-2026"
+        },
+        {
+          "d": "2026-10",
+          "cat": "Payments",
+          "t": "Samsung announces USDC transfers in Samsung Wallet",
+          "card": "Samsung announces USDC transfers",
+          "b": "The announced rollout covers eligible users on compatible U.S. Galaxy devices, with USDC transfers to supported wallets and qualifying bank accounts in more than 60 countries. The stated reach is 82 million devices, not 82 million active users or completed transfers.",
+          "u": "https://solana.com/news/solana-ecosystem-roundup-october-2026"
+        },
+        {
+          "d": "2026-10",
+          "cat": "Real assets",
+          "t": "J.P. Morgan tokenized funds reach Solana",
+          "card": "J.P. Morgan funds reach Solana",
+          "b": "MONY and JLTXX became available through Morgan Money to qualified U.S. investors, supporting subscriptions, redemptions and delivery of token balances to blockchain addresses. This is qualified-investor access, not an unrestricted retail offering.",
+          "u": "https://solana.com/news/solana-ecosystem-roundup-october-2026"
+        },
+        {
+          "d": "2026-10",
+          "cat": "Real assets",
+          "t": "Securitize Stocks launches on Solana",
+          "b": "Eligible investors in the U.S., EU and other permitted jurisdictions can access tokenized security entitlements backed 1:1 by underlying shares, including dividends and applicable voting rights. Eligibility restrictions still apply.",
+          "u": "https://solana.com/news/solana-ecosystem-roundup-october-2026"
+        },
+        {
+          "d": "2026-10",
+          "cat": "Network",
+          "t": "Solana DvP adds an open-source settlement primitive",
+          "b": "The Solana Foundation launched a delivery-versus-payment program with atomic exchange, isolated escrow and settlement deadlines. J.P. Morgan contributed input on institutional settlement practices and requirements.",
+          "u": "https://solana.com/news/solana-ecosystem-roundup-october-2026"
+        }
+      ]
     }
   }
 }
