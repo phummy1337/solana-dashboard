@@ -1021,6 +1021,41 @@ function zoneFor(dateStr, close) {
 /* -------------------------------------------------------------------- charts */
 Chart.defaults.font.family = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 Chart.defaults.color = '#6B7FAB';
+/* Value labels inside stacked bar segments. Off unless a chart opts in with
+   options.plugins.segLabels.on; the formatter rides on chart.$segFmt rather
+   than in options, where Chart.js would treat a function as scriptable.
+   A segment too short or too narrow for its label gets none, so labels never
+   spill into a neighbour. */
+Chart.register({
+  id: 'segLabels',
+  afterDatasetsDraw(chart, _args, opts) {
+    if (!opts?.on || !chart.$segFmt) return;
+    const g = chart.ctx, px = opts.size || 13;
+    g.save();
+    g.font = `700 ${px}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    chart.data.datasets.forEach((ds, di) => {
+      const meta = chart.getDatasetMeta(di);
+      if (meta.hidden || ds.hidden || meta.type !== 'bar') return;
+      meta.data.forEach((bar, i) => {
+        const raw = ds.data[i];
+        const v = raw != null && typeof raw === 'object' ? raw.y : raw;
+        if (v == null || !isFinite(v) || v <= 0) return;
+        const { x, y, base, width } = bar.getProps(['x', 'y', 'base', 'width'], true);
+        const h = Math.abs(base - y);
+        const txt = chart.$segFmt(v);
+        if (h < px * 1.5 || g.measureText(txt).width + 8 > width) return;
+        // Dark text on the bright fills, light on the deep ones.
+        const c = String(ds.backgroundColor).slice(1, 7);
+        const [r, gr, b] = [0, 2, 4].map(k => parseInt(c.slice(k, k + 2), 16));
+        g.fillStyle = (0.299 * r + 0.587 * gr + 0.114 * b) > 150 ? '#06122A' : '#F1F5FB';
+        g.fillText(txt, x, (y + base) / 2);
+      });
+    });
+    g.restore();
+  },
+});
 const gridCfg = { color: 'rgba(143,165,212,0.16)', drawTicks: false };
 /* A log axis stops at the data, so a $68M bar ran past a $10M top gridline with
    nothing to measure it against. Round the top out to the next round number so
@@ -1957,8 +1992,27 @@ async function buildTrendImage(key, title, fmt, el, byChain, range) {
   else lead = cad;
   const note = [lead, caveats].filter(Boolean).join(' · ');
   await dfdvLogo();                      // resolve first: snapshot is restored immediately
-  return buildShareImage(snapshotChart(chart, 15, 4, shareLayout(items, fmt).chart),
-                         title, note, items, fmt);
+  // Quarterly stacked bars carry each segment's value on the export, so the
+  // image says what each chain did in each quarter, not only the latest one.
+  const segs = agg?.value === 'q' && chart.config.type === 'bar'
+    && chart.options.scales?.y?.stacked && chart.data.datasets.length > 1;
+  if (segs) {
+    // Two decimals on dollar segments ("$28.94B", not "$28.9B"): the label is
+    // the exact figure for that chain and quarter, not an axis reading.
+    chart.$segFmt = fmt === usd ? v => (Math.abs(v) < 1e3 ? usd(v) : compact(v, '$', 2)) : fmt;
+    (chart.config.options.plugins ??= {}).segLabels = { on: true, size: 14 };
+  }
+  let snap;
+  try {
+    snap = snapshotChart(chart, 15, 4, shareLayout(items, fmt).chart);
+  } finally {
+    if (segs) {
+      delete chart.config.options.plugins.segLabels;
+      delete chart.$segFmt;
+      chart.update('none');
+    }
+  }
+  return buildShareImage(snap, title, note, items, fmt);
 }
 
 async function downloadTrendImage(key, title, fmt, el, range, byChain) {
