@@ -1317,6 +1317,14 @@ function aggKey(dateStr, period) {
   if (period === 'q') return dateStr.slice(0, 4) + '-Q' + (Math.floor((+dateStr.slice(5, 7) - 1) / 3) + 1);
   return dateStr.slice(0, 4);
 }
+/* A quarter as the bar it labels: "4Q26". Used for the axis, the tooltip and
+   the export alike, so all three name the same bar the same way. */
+function quarterLabel(dateStr) {
+  return `${Math.floor((+dateStr.slice(5, 7) - 1) / 3) + 1}Q${dateStr.slice(2, 4)}`;
+}
+/* Shares in the % view: two decimals and a per cent sign, never the card's
+   own currency formatter. */
+const sharePct = v => v == null || !isFinite(v) ? '—' : v.toFixed(2) + '%';
 function aggregateSeries(pts, period, mode) {
   if (period === 'd') return pts;
   const buckets = new Map();
@@ -1360,8 +1368,8 @@ function periodClosed(dateStr, period) {
   return true;
 }
 
-function sparkOptions(t, unit, logScale) {
-  return {
+function sparkOptions(t, unit, logScale, period = 'd', ptdStarts = new Set(), nBars = 0) {
+  const opts = {
     responsive: true, maintainAspectRatio: false, animation: false,
     interaction: { mode: 'index', intersect: false },
     scales: {
@@ -1425,6 +1433,33 @@ function sparkOptions(t, unit, logScale) {
                    afterTitle: c => c[0]?.raw?.ptd ? `${c[0].raw.ptd} · ${c[0].raw.n} of ${c[0].raw.of} days` : '',
                  } } },
   };
+  if (period === 'q') {
+    // Quarterly: one tick per bar, named by its quarter ("1Q26"), with the
+    // running one marked QTD. Month ticks (01/23, 06/23, ...) left no way to
+    // tell which bar was which quarter. Points sit at the start of their
+    // quarter, parsed by the date adapter as local midnight, so read them back
+    // with local getters.
+    const x = opts.scales.x;
+    x.time = { ...x.time, unit: 'quarter' };
+    // Up to eight quarters (two years) every bar keeps its label, even on a
+    // phone; past that Chart.js thins them to what fits legibly.
+    x.ticks = { ...x.ticks, source: 'data', autoSkip: nBars > 8, autoSkipPadding: 10,
+      callback(v) {
+        const dt = new Date(v);
+        const d = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-01`;
+        const q = quarterLabel(d);
+        if (!ptdStarts.has(d)) return q;
+        // On a narrow plot the running quarter's tag goes on a second line.
+        return this.chart.width < 600 ? [q, 'QTD'] : `${q} QTD`;
+      } };
+    const cb = opts.plugins.tooltip.callbacks;
+    cb.title = c => {
+      const r = c[0]?.raw;
+      return r?.xd ? quarterLabel(r.xd) + (r.ptd ? ` ${r.ptd}` : '') : (c[0]?.label ?? '');
+    };
+    cb.afterTitle = c => c[0]?.raw?.ptd ? `${c[0].raw.n} of ${c[0].raw.of} days` : '';
+  }
+  return opts;
 }
 
 let trendCharts = {};   // TRENDS key -> Chart instance
@@ -1906,7 +1941,7 @@ async function buildTrendImage(key, title, fmt, el, byChain, range) {
   const PTD = {
     WTD: ['Week to date', () => `week of ${fmtDate(asOf)}`],
     MTD: ['Month to date', () => `${dt.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} ${dt.getUTCFullYear()}`],
-    QTD: ['Quarter to date', () => `Q${Math.floor(dt.getUTCMonth() / 3) + 1} ${dt.getUTCFullYear()}`],
+    QTD: ['Quarter to date', () => quarterLabel(asOf)],
     YTD: ['Year to date', () => String(dt.getUTCFullYear())],
   };
   // One period ranked as bars (labels are chains, not dates) versus a series.
@@ -2330,7 +2365,7 @@ function makeTrendCard(t) {
   // the card header sits above a chain legend, but a downloaded PNG travels
   // alone — say what the lines are
   el.querySelector('[data-cdl]').addEventListener('click', () =>
-    downloadTrendImage(orig.key, t.title, t.fmt, el, range, !!cmp));
+    downloadTrendImage(orig.key, t.title, pctMode ? sharePct : t.fmt, el, range, !!cmp));
   // Click the plot area to enlarge; ignore clicks on controls and legend.
   el.querySelector('.spark').addEventListener('click', e => {
     if (e.target.closest('button, select, a, .uinfo')) return;
@@ -2453,6 +2488,20 @@ function makeTrendCard(t) {
         const ds = datasets.find(d => d.label === name);
         return ds?.data[ds.data.length - 1]?.y;
       };
+      // In the % view the legend gives each chain's share of the latest column,
+      // computed the way the stack below normalises it (visible chains only).
+      const shareOf = name => {
+        const ds = datasets.find(d => d.label === name);
+        const p = ds?.data[ds.data.length - 1];
+        if (!p) return null;
+        let tot = 0;
+        for (const d of datasets) {
+          if (d.hidden) continue;
+          const q = d.data.find(z => z.x === p.x);
+          if (q && q.y > 0) tot += q.y;
+        }
+        return tot ? (p.y / tot) * 100 : null;
+      };
       // Rank by the value currently plotted, so the order re-sorts whenever
       // the range or aggregation changes. Series with no value sink last.
       const ranked = seriesList.filter(c => cmp[c.key])
@@ -2464,7 +2513,7 @@ function makeTrendCard(t) {
         ranked.map(({ c, v }) =>
         `<button class="leg" data-chain="${c.key}" aria-pressed="${!hiddenSet.has(c.key)}">
            <span class="sw" style="background:${c.color}"></span>${c.name}
-           <span class="v num">${v != null ? t.fmt(v) : '—'}</span></button>`).join('');
+           <span class="v num">${v == null ? '—' : pctMode ? sharePct(shareOf(c.name)) : t.fmt(v)}</span></button>`).join('');
       /* Isolate, then add. From the default all-on state the first click shows
          only what was clicked, rather than subtracting it — with eleven chains,
          getting down to one or two meant nine clicks the other way round.
@@ -2538,7 +2587,7 @@ function makeTrendCard(t) {
       const dt = new Date(dstr + 'T00:00:00Z');
       const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()];
       if (period === 'y') return String(dt.getUTCFullYear());
-      if (period === 'q') return `Q${Math.floor(dt.getUTCMonth() / 3) + 1} ${dt.getUTCFullYear()}`;
+      if (period === 'q') return quarterLabel(dstr);
       if (period === 'w') return `${mo} ${dt.getUTCDate()}`;
       return `${mo} ${dt.getUTCFullYear()}`;
     };
@@ -2595,6 +2644,8 @@ function makeTrendCard(t) {
   }
 
   const plotted = datasets.flatMap(ds => ds.data).map(p => p.xd || p.x).sort();
+  const ptdStarts = new Set(datasets.flatMap(ds => ds.data).filter(p => p.ptd).map(p => p.x));
+  const nBars = new Set(datasets.flatMap(ds => ds.data).map(p => p.x)).size;
   if (plotted.length) setNote(plotted[plotted.length - 1]);
 
   if (barMode) {
@@ -2627,7 +2678,7 @@ function makeTrendCard(t) {
       categoryPercentage: 0.98, barPercentage: 0.96,
       hidden: ds.hidden,
     }));
-    const opts = sparkOptions(t, unit, logScale);
+    const opts = sparkOptions(t, unit, logScale, period, ptdStarts, nBars);
     opts.scales.x.stacked = stacked;
     opts.scales.y.stacked = stacked;
     // A stack is read as a total, so the axis has to start at zero even when
@@ -2652,7 +2703,7 @@ function makeTrendCard(t) {
   }
 
   trendCharts[t.key] = new Chart(canvas, {
-    type: 'line', data: { datasets }, options: sparkOptions(t, unit, logScale),
+    type: 'line', data: { datasets }, options: sparkOptions(t, unit, logScale, period, ptdStarts, nBars),
   });
   attachBrush(el, trendCharts[t.key], t.key);
   return el;
