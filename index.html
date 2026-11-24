@@ -1795,7 +1795,8 @@ function dfdvLogo() {
    DFDV mark top-right, gradient CTA footer. */
 async function buildShareImage(src, title, note, items, fmt) {
   const logo = await dfdvLogo();
-  const S = 2, W = SHARE_W, PAD = SHARE_PAD, H = SHARE_H;
+  // 3x: 3600x1800, so a card posted to X or LinkedIn stays sharp when opened.
+  const S = 3, W = SHARE_W, PAD = SHARE_PAD, H = SHARE_H;
   const { laid, chart, font } = shareLayout(items, fmt);
   const cv = document.createElement('canvas');
   cv.width = W * S; cv.height = H * S;
