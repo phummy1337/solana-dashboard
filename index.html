@@ -1032,7 +1032,9 @@ Chart.register({
     if (!opts?.on || !chart.$segFmt) return;
     const g = chart.ctx, px = opts.size || 13;
     g.save();
-    g.font = `700 ${px}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+    // Same family and size as the export legend, a lighter weight: the labels
+    // annotate the bars rather than compete with them.
+    g.font = `${opts.weight || 500} ${px}px ${opts.family || 'Syne, sans-serif'}`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     chart.data.datasets.forEach((ds, di) => {
@@ -1046,10 +1048,12 @@ Chart.register({
         const h = Math.abs(base - y);
         const txt = chart.$segFmt(v);
         if (h < px * 1.5 || g.measureText(txt).width + 8 > width) return;
-        // Dark text on the bright fills, light on the deep ones.
+        // Softened, never solid black or white: a translucent navy on the
+        // bright fills, the legend's own text colour on the deep ones.
         const c = String(ds.backgroundColor).slice(1, 7);
         const [r, gr, b] = [0, 2, 4].map(k => parseInt(c.slice(k, k + 2), 16));
-        g.fillStyle = (0.299 * r + 0.587 * gr + 0.114 * b) > 150 ? '#06122A' : '#F1F5FB';
+        g.fillStyle = (0.299 * r + 0.587 * gr + 0.114 * b) > 150
+          ? 'rgba(6, 18, 42, 0.68)' : '#D3DBEA';
         g.fillText(txt, x, (y + base) / 2);
       });
     });
@@ -1997,10 +2001,13 @@ async function buildTrendImage(key, title, fmt, el, byChain, range) {
   const segs = agg?.value === 'q' && chart.config.type === 'bar'
     && chart.options.scales?.y?.stacked && chart.data.datasets.length > 1;
   if (segs) {
-    // Two decimals on dollar segments ("$28.94B", not "$28.9B"): the label is
-    // the exact figure for that chain and quarter, not an axis reading.
-    chart.$segFmt = fmt === usd ? v => (Math.abs(v) < 1e3 ? usd(v) : compact(v, '$', 2)) : fmt;
-    (chart.config.options.plugins ??= {}).segLabels = { on: true, size: 14 };
+    // One decimal on dollar segments ("$28.9B"), and the legend's family and
+    // size, read off the same layout the legend is drawn with.
+    chart.$segFmt = fmt === usd ? v => (Math.abs(v) < 1e3 ? usd(v) : compact(v, '$', 1)) : fmt;
+    const legFont = shareLayout(items, fmt).font;              // "700 14px Syne, sans-serif"
+    const m = legFont.match(/^\d+ (\d+)px (.+)$/);
+    (chart.config.options.plugins ??= {}).segLabels = {
+      on: true, weight: 500, size: m ? +m[1] : 14, family: m ? m[2] : 'Syne, sans-serif' };
   }
   let snap;
   try {
