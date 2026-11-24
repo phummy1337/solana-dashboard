@@ -881,7 +881,11 @@ function compact(n, prefix = '', places = null) {
       return prefix + (n / v).toFixed(places ?? (a / v >= 100 ? 0 : a / v >= 10 ? 1 : 2)) + s;
   return prefix + n.toFixed(places ?? (a < 1 ? 4 : 2));
 }
-const usd = n => compact(n, '$');
+/* Under a dollar, cents rather than compact()'s four places: a chain with
+   barely any volume read "$0.1626" in a legend of billions. */
+const usd = n => n != null && isFinite(n) && n !== 0 && Math.abs(n) < 1
+  ? (Math.abs(n) < 0.005 ? '<$0.01' : '$' + n.toFixed(2))
+  : compact(n, '$');
 /* Axis ticks drop the decimal — "$10M" reads at a glance where "$10.0M" makes
    you parse it. Only the compact formatters get a tick variant: a median fee of
    $0.00003 and a +1.4% return have nothing to round away. */
